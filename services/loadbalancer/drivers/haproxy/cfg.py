@@ -34,6 +34,7 @@ BALANCE_MAP = {
     constants.LB_METHOD_ROUND_ROBIN: 'roundrobin',
     constants.LB_METHOD_LEAST_CONNECTIONS: 'leastconn',
     constants.LB_METHOD_SOURCE_IP: 'source'
+    constants.LB_METHOD_URI_HASH: 'uri'
 }
 
 STATS_MAP = {

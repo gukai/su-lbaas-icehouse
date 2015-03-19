@@ -62,7 +62,7 @@ class CreatePool(neutronV20.CreateCommand):
         parser.add_argument(
             '--lb-method',
             required=True,
-            choices=['ROUND_ROBIN', 'LEAST_CONNECTIONS', 'SOURCE_IP'],
+            choices=['ROUND_ROBIN', 'LEAST_CONNECTIONS', 'SOURCE_IP', 'URI_HASH'],
             help=_('The algorithm used to distribute load between the members '
                    'of the pool'))
         parser.add_argument(

@@ -124,6 +124,7 @@ class Pool(model_base.BASEV2, models_v2.HasId, models_v2.HasTenant,
     lb_method = sa.Column(sa.Enum("ROUND_ROBIN",
                                   "LEAST_CONNECTIONS",
                                   "SOURCE_IP",
+                                  "URI_HASH",
                                   name="pools_lb_method"),
                           nullable=False)
     admin_state_up = sa.Column(sa.Boolean(), nullable=False)

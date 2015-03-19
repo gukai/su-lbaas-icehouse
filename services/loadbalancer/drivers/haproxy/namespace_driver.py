@@ -226,7 +226,21 @@ class HaproxyNSDriver(agent_device_driver.AgentDeviceDriver):
                 os.makedirs(conf_dir, 0o755)
         return os.path.join(conf_dir, kind)
 
+    #Add by gukai  - 2015-2-27
+    #if someone delete a namespce which have running processes in it,
+    # every command exec in namespace return  Invalid_Argument ERROR.
+    def _fix_Invalid_Argument_namespace(self, namespace):
+        ns = ip_lib.IPWrapper(self.root_helper, namespace)
+        if not ns.netns.exists(namespace):
+            return
+        testcmd = ['ip', 'addr', "show"]
+        try:
+            ns.netns.execute(testcmd)
+        except Exception:
+            ns.netns.delete(namespace)
+
     def _plug(self, namespace, port, reuse_existing=True):
+        self._fix_Invalid_Argument_namespace(namespace)
         self.plugin_rpc.plug_vip_port(port['id'])
         interface_name = self.vif_driver.get_device_name(Wrap(port))
 

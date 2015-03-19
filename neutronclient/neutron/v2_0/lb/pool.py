@@ -31,7 +31,7 @@ class ListPool(neutronV20.ListCommand):
 
     resource = 'pool'
     log = logging.getLogger(__name__ + '.ListPool')
-    list_columns = ['id', 'name', 'provider', 'lb_method', 'protocol',
+    list_columns = ['id', 'name', 'provider', 'lb_method', 'protocol', 'timeout_connect', 'timeout_client', 'timeout_server', 'max_conn',
                     'admin_state_up', 'status']
     _formatters = {'provider': _format_provider}
     pagination_support = True
@@ -75,6 +75,18 @@ class CreatePool(neutronV20.CreateCommand):
             choices=['HTTP', 'HTTPS', 'TCP'],
             help=_('Protocol for balancing'))
         parser.add_argument(
+            '--timeout_connect',
+            help=_('maximum time(milliseconds) to wait for a connection attempt to a server to succeed (default:50000)'))
+        parser.add_argument(
+            '--timeout_client',
+            help=_('maximum time(milliseconds) inactivity on the client side.(default:50000)'))
+        parser.add_argument(
+            '--timeout_server',
+            help=_('maximum time(milliseconds) inactivity on the server side.(default:5000)'))
+        parser.add_argument(
+            '--max_conn',
+            help=_('the maximum number of concurrent connections the frontend will accept to serve.'))
+        parser.add_argument(
             '--subnet-id', metavar='SUBNET',
             required=True,
             help=_('The subnet on which the members of the pool will be '
@@ -94,7 +106,7 @@ class CreatePool(neutronV20.CreateCommand):
         }
         neutronV20.update_dict(parsed_args, body[self.resource],
                                ['description', 'lb_method', 'name',
-                                'protocol', 'tenant_id', 'provider'])
+                                'protocol',  'timeout_connect', 'timeout_client', 'timeout_server', 'max_conn', 'tenant_id', 'provider'])
         return body
 
 

@@ -98,3 +98,10 @@ class LbaasAgentApi(proxy.RpcProxy):
             ),
             topic=self.topic
         )
+
+    def ha_reschedule_pool(self):
+        return self.call(
+            self.context,
+            self.make_msg('ha_reschedule_pool', host=self.host),
+            topic=self.topic
+        )

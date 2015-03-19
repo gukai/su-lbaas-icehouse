@@ -39,6 +39,9 @@ OPTS = [
                  '.haproxy.namespace_driver.HaproxyNSDriver'],
         help=_('Drivers used to manage loadbalancing devices'),
     ),
+    cfg.BoolOpt('enable_ha_reschedule', default=False,
+                    help=_("Rescchedule to another agent in HA environment.")
+    ),
 ]
 
 
@@ -122,6 +125,22 @@ class LbaasAgentManager(periodic_task.PeriodicTasks):
 
     def initialize_service_hook(self, started_by):
         self.sync_state()
+
+    @periodic_task.periodic_task(spacing=15)
+    def ha_reschedule_pool(self, context):
+        if cfg.CONF.enable_ha_reschedule:
+            self.plugin_rpc.ha_reschedule_pool()
+        known_instances = set(self.instance_mapping.keys())
+        memory_instances = set(self.plugin_rpc.get_ready_devices())
+
+        reschedule_instances = memory_instances - known_instances
+        if not reschedule_instances:
+            return []
+        else:
+            LOG.debug("Try to reschedule pool here.")
+
+        for pool_id in reschedule_instances:
+            self._reload_pool(pool_id)
 
     @periodic_task.periodic_task(spacing=10)
     def periodic_resync(self, context):

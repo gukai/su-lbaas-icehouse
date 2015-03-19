@@ -123,7 +123,7 @@ class LbaasAgentManager(periodic_task.PeriodicTasks):
     def initialize_service_hook(self, started_by):
         self.sync_state()
 
-    @periodic_task.periodic_task
+    @periodic_task.periodic_task(spacing=10)
     def periodic_resync(self, context):
         if self.needs_resync:
             self.needs_resync = False

@@ -201,7 +201,7 @@ RESOURCE_ATTRIBUTE_MAP = {
                            'validate': {'type:non_negative': None},
                            'convert_to': attr.convert_to_int,
                            'is_visible': True},
-        'timeout_client': {'allow_post': True, 'allow_put': True,
+        'timeout_server': {'allow_post': True, 'allow_put': True,
                            'default': 5000,
                            'validate': {'type:non_negative': None},
                            'convert_to': attr.convert_to_int,

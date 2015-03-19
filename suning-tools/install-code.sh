@@ -4,7 +4,7 @@ base_path="/usr/lib/python2.6/site-packages/neutron"
 client_base_path="/usr/lib/python2.6/site-packages"
 
 server_list="$1"
-target_list="db/loadbalancer_db.py extensions/loadbalancer.py services/loadbalancer/constants.py services/loadbalancer/drivers/haproxy/cfg.py services/loadbalancer/drivers/haproxy/namespace_driver.py services/loadbalancer/agent/agent_manager.py services/loadbalancer/agent/agent_api.py services/loadbalancer/agent_scheduler.py services/loadbalancer/drivers/common/agent_driver_base.py"
+target_list="db/loadbalancer/loadbalancer_db.py extensions/loadbalancer.py services/loadbalancer/constants.py services/loadbalancer/drivers/haproxy/cfg.py services/loadbalancer/drivers/haproxy/namespace_driver.py services/loadbalancer/agent/agent_manager.py services/loadbalancer/agent/agent_api.py services/loadbalancer/agent_scheduler.py services/loadbalancer/drivers/common/agent_driver_base.py"
 client_target_list="neutronclient/neutron/v2_0/lb/pool.py"
 
 for server in $server_list; do

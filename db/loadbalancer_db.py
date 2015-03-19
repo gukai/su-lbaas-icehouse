@@ -62,9 +62,10 @@ class PoolStatistics(model_base.BASEV2):
     bytes_out = sa.Column(sa.BigInteger, nullable=False)
     active_connections = sa.Column(sa.BigInteger, nullable=False)
     total_connections = sa.Column(sa.BigInteger, nullable=False)
+    request_rate = sa.Column(sa.BigInteger, nullable=False)
 
     @validates('bytes_in', 'bytes_out',
-               'active_connections', 'total_connections')
+               'active_connections', 'total_connections', 'request_rate')
     def validate_non_negative_int(self, key, value):
         if value < 0:
             data = {'key': key, 'value': value}
@@ -539,7 +540,8 @@ class LoadBalancerPluginDb(LoadBalancerPluginBase,
             bytes_in=data.get(lb_const.STATS_IN_BYTES, 0),
             bytes_out=data.get(lb_const.STATS_OUT_BYTES, 0),
             active_connections=data.get(lb_const.STATS_ACTIVE_CONNECTIONS, 0),
-            total_connections=data.get(lb_const.STATS_TOTAL_CONNECTIONS, 0)
+            total_connections=data.get(lb_const.STATS_TOTAL_CONNECTIONS, 0),
+            request_rate=data.get(lb_const.STATS_REQ_RATE, 0) 
         )
         return stats_db
 
@@ -618,7 +620,8 @@ class LoadBalancerPluginDb(LoadBalancerPluginBase,
         res = {lb_const.STATS_IN_BYTES: stats['bytes_in'],
                lb_const.STATS_OUT_BYTES: stats['bytes_out'],
                lb_const.STATS_ACTIVE_CONNECTIONS: stats['active_connections'],
-               lb_const.STATS_TOTAL_CONNECTIONS: stats['total_connections']}
+               lb_const.STATS_TOTAL_CONNECTIONS: stats['total_connections'],
+               lb_const.STATS_REQ_RATE: stats['request_rate']}
         return {'stats': res}
 
     def create_pool_health_monitor(self, context, health_monitor, pool_id):

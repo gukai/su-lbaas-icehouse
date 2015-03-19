@@ -44,6 +44,7 @@ STATS_MAP = {
     constants.STATS_TOTAL_SESSIONS: 'stot',
     constants.STATS_IN_BYTES: 'bin',
     constants.STATS_OUT_BYTES: 'bout',
+    constants.STATS_REQ_RATE: 'req_rate',
     constants.STATS_CONNECTION_ERRORS: 'econ',
     constants.STATS_RESPONSE_ERRORS: 'eresp'
 }

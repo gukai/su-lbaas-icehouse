@@ -166,6 +166,8 @@ class HaproxyNSDriver(agent_device_driver.AgentDeviceDriver):
             if stats.get('type') == TYPE_BACKEND_RESPONSE:
                 unified_stats = dict((k, stats.get(v, ''))
                                      for k, v in hacfg.STATS_MAP.items())
+                if not unified_stats['request_rate']:
+                    unified_stats['request_rate'] = 0
                 return unified_stats
 
         return {}

@@ -16,7 +16,7 @@
 # @author: Ilya Shakhat, Mirantis Inc.
 #
 
-import logging
+from __future__ import print_function
 
 from neutronclient.neutron import v2_0 as neutronV20
 from neutronclient.openstack.common.gettextutils import _
@@ -26,7 +26,6 @@ class ListHealthMonitor(neutronV20.ListCommand):
     """List healthmonitors that belong to a given tenant."""
 
     resource = 'health_monitor'
-    log = logging.getLogger(__name__ + '.ListHealthMonitor')
     list_columns = ['id', 'type', 'admin_state_up']
     pagination_support = True
     sorting_support = True
@@ -36,20 +35,18 @@ class ShowHealthMonitor(neutronV20.ShowCommand):
     """Show information of a given healthmonitor."""
 
     resource = 'health_monitor'
-    log = logging.getLogger(__name__ + '.ShowHealthMonitor')
 
 
 class CreateHealthMonitor(neutronV20.CreateCommand):
     """Create a healthmonitor."""
 
     resource = 'health_monitor'
-    log = logging.getLogger(__name__ + '.CreateHealthMonitor')
 
     def add_known_arguments(self, parser):
         parser.add_argument(
             '--admin-state-down',
             dest='admin_state', action='store_false',
-            help=_('Set admin state up to false'))
+            help=_('Set admin state up to false.'))
         parser.add_argument(
             '--expected-codes',
             help=_('The list of HTTP status codes expected in '
@@ -57,7 +54,7 @@ class CreateHealthMonitor(neutronV20.CreateCommand):
                    'attribute can contain one value, '
                    'or a list of values separated by comma, '
                    'or a range of values (e.g. "200-299"). If this attribute '
-                   'is not specified, it defaults to "200". '))
+                   'is not specified, it defaults to "200".'))
         parser.add_argument(
             '--http-method',
             help=_('The HTTP method used for requests by the monitor of type '
@@ -66,7 +63,7 @@ class CreateHealthMonitor(neutronV20.CreateCommand):
             '--url-path',
             help=_('The HTTP path used in the HTTP request used by the monitor'
                    ' to test a member health. This must be a string '
-                   'beginning with a / (forward slash)'))
+                   'beginning with a / (forward slash).'))
         parser.add_argument(
             '--delay',
             required=True,
@@ -85,7 +82,7 @@ class CreateHealthMonitor(neutronV20.CreateCommand):
         parser.add_argument(
             '--type',
             required=True, choices=['PING', 'TCP', 'HTTP', 'HTTPS'],
-            help=_('One of predefined health monitor types'))
+            help=_('One of the predefined health monitor types.'))
 
     def args2body(self, parsed_args):
         body = {
@@ -107,7 +104,6 @@ class UpdateHealthMonitor(neutronV20.UpdateCommand):
     """Update a given healthmonitor."""
 
     resource = 'health_monitor'
-    log = logging.getLogger(__name__ + '.UpdateHealthMonitor')
     allow_names = False
 
 
@@ -115,23 +111,21 @@ class DeleteHealthMonitor(neutronV20.DeleteCommand):
     """Delete a given healthmonitor."""
 
     resource = 'health_monitor'
-    log = logging.getLogger(__name__ + '.DeleteHealthMonitor')
 
 
 class AssociateHealthMonitor(neutronV20.NeutronCommand):
     """Create a mapping between a health monitor and a pool."""
 
-    log = logging.getLogger(__name__ + '.AssociateHealthMonitor')
     resource = 'health_monitor'
 
     def get_parser(self, prog_name):
         parser = super(AssociateHealthMonitor, self).get_parser(prog_name)
         parser.add_argument(
             'health_monitor_id', metavar='HEALTH_MONITOR_ID',
-            help=_('Health monitor to associate'))
+            help=_('Health monitor to associate.'))
         parser.add_argument(
             'pool_id', metavar='POOL',
-            help=_('ID of the pool to be associated with the health monitor'))
+            help=_('ID of the pool to be associated with the health monitor.'))
         return parser
 
     def run(self, parsed_args):
@@ -141,24 +135,24 @@ class AssociateHealthMonitor(neutronV20.NeutronCommand):
         pool_id = neutronV20.find_resourceid_by_name_or_id(
             neutron_client, 'pool', parsed_args.pool_id)
         neutron_client.associate_health_monitor(pool_id, body)
-        print >>self.app.stdout, (_('Associated health monitor '
-                                    '%s') % parsed_args.health_monitor_id)
+        print((_('Associated health monitor '
+                 '%s') % parsed_args.health_monitor_id),
+              file=self.app.stdout)
 
 
 class DisassociateHealthMonitor(neutronV20.NeutronCommand):
     """Remove a mapping from a health monitor to a pool."""
 
-    log = logging.getLogger(__name__ + '.DisassociateHealthMonitor')
     resource = 'health_monitor'
 
     def get_parser(self, prog_name):
         parser = super(DisassociateHealthMonitor, self).get_parser(prog_name)
         parser.add_argument(
             'health_monitor_id', metavar='HEALTH_MONITOR_ID',
-            help=_('Health monitor to associate'))
+            help=_('Health monitor to associate.'))
         parser.add_argument(
             'pool_id', metavar='POOL',
-            help=_('ID of the pool to be associated with the health monitor'))
+            help=_('ID of the pool to be associated with the health monitor.'))
         return parser
 
     def run(self, parsed_args):
@@ -169,5 +163,6 @@ class DisassociateHealthMonitor(neutronV20.NeutronCommand):
         neutron_client.disassociate_health_monitor(pool_id,
                                                    parsed_args
                                                    .health_monitor_id)
-        print >>self.app.stdout, (_('Disassociated health monitor '
-                                    '%s') % parsed_args.health_monitor_id)
+        print((_('Disassociated health monitor '
+                 '%s') % parsed_args.health_monitor_id),
+              file=self.app.stdout)

@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-#
 # Copyright 2013 New Dream Network, LLC (DreamHost)
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -13,14 +11,13 @@
 #    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 #    License for the specific language governing permissions and limitations
 #    under the License.
-#
-# @author: Mark McClain, DreamHost
 
 from oslo.config import cfg
 
 from neutron.agent import rpc as agent_rpc
 from neutron.common import constants as n_const
 from neutron.common import exceptions as n_exc
+from neutron.common import rpc as n_rpc
 from neutron.common import topics
 from neutron import context
 from neutron.openstack.common import importutils
@@ -39,9 +36,6 @@ OPTS = [
                  '.haproxy.namespace_driver.HaproxyNSDriver'],
         help=_('Drivers used to manage loadbalancing devices'),
     ),
-    cfg.BoolOpt('enable_ha_reschedule', default=False,
-                    help=_("Rescchedule to another agent in HA environment.")
-    ),
 ]
 
 
@@ -49,7 +43,7 @@ class DeviceNotFoundOnAgent(n_exc.NotFound):
     msg = _('Unknown device with pool_id %(pool_id)s')
 
 
-class LbaasAgentManager(periodic_task.PeriodicTasks):
+class LbaasAgentManager(n_rpc.RpcCallback, periodic_task.PeriodicTasks):
 
     RPC_API_VERSION = '2.0'
     # history
@@ -61,6 +55,7 @@ class LbaasAgentManager(periodic_task.PeriodicTasks):
     #       object individually;
 
     def __init__(self, conf):
+        super(LbaasAgentManager, self).__init__()
         self.conf = conf
         self.context = context.get_admin_context_without_session()
         self.plugin_rpc = agent_api.LbaasAgentApi(
@@ -126,23 +121,7 @@ class LbaasAgentManager(periodic_task.PeriodicTasks):
     def initialize_service_hook(self, started_by):
         self.sync_state()
 
-    @periodic_task.periodic_task(spacing=15)
-    def ha_reschedule_pool(self, context):
-        if cfg.CONF.enable_ha_reschedule:
-            self.plugin_rpc.ha_reschedule_pool()
-        known_instances = set(self.instance_mapping.keys())
-        memory_instances = set(self.plugin_rpc.get_ready_devices())
-
-        reschedule_instances = memory_instances - known_instances
-        if not reschedule_instances:
-            return []
-        else:
-            LOG.debug("Try to reschedule pool here.")
-
-        for pool_id in reschedule_instances:
-            self._reload_pool(pool_id)
-
-    @periodic_task.periodic_task(spacing=10)
+    @periodic_task.periodic_task
     def periodic_resync(self, context):
         if self.needs_resync:
             self.needs_resync = False

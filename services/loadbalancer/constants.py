@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 # Copyright 2013 Mirantis, Inc.
 # All Rights Reserved.
 #
@@ -18,7 +16,6 @@
 LB_METHOD_ROUND_ROBIN = 'ROUND_ROBIN'
 LB_METHOD_LEAST_CONNECTIONS = 'LEAST_CONNECTIONS'
 LB_METHOD_SOURCE_IP = 'SOURCE_IP'
-LB_METHOD_URI_HASH = 'URI_HASH'
 
 PROTOCOL_TCP = 'TCP'
 PROTOCOL_HTTP = 'HTTP'
@@ -41,7 +38,6 @@ STATS_MAX_SESSIONS = 'max_sessions'
 STATS_TOTAL_SESSIONS = 'total_sessions'
 STATS_IN_BYTES = 'bytes_in'
 STATS_OUT_BYTES = 'bytes_out'
-STATS_REQ_RATE = 'request_rate'
 STATS_CONNECTION_ERRORS = 'connection_errors'
 STATS_RESPONSE_ERRORS = 'response_errors'
 STATS_STATUS = 'status'

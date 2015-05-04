@@ -17,7 +17,6 @@
 #
 
 import argparse
-import logging
 
 from neutronclient.neutron import v2_0 as neutronv20
 from neutronclient.openstack.common.gettextutils import _
@@ -27,7 +26,6 @@ class ListFirewallRule(neutronv20.ListCommand):
     """List firewall rules that belong to a given tenant."""
 
     resource = 'firewall_rule'
-    log = logging.getLogger(__name__ + '.ListFirewallRule')
     list_columns = ['id', 'name', 'firewall_policy_id', 'summary', 'enabled']
     pagination_support = True
     sorting_support = True
@@ -64,55 +62,53 @@ class ShowFirewallRule(neutronv20.ShowCommand):
     """Show information of a given firewall rule."""
 
     resource = 'firewall_rule'
-    log = logging.getLogger(__name__ + '.ShowFirewallRule')
 
 
 class CreateFirewallRule(neutronv20.CreateCommand):
     """Create a firewall rule."""
 
     resource = 'firewall_rule'
-    log = logging.getLogger(__name__ + '.CreateFirewallRule')
 
     def add_known_arguments(self, parser):
         parser.add_argument(
             '--name',
-            help=_('Name for the firewall rule'))
+            help=_('Name for the firewall rule.'))
         parser.add_argument(
             '--description',
-            help=_('Description for the firewall rule'))
+            help=_('Description for the firewall rule.'))
         parser.add_argument(
             '--shared',
             dest='shared',
             action='store_true',
-            help=_('Set shared to True (default False)'),
+            help=_('Set shared to True (default is False).'),
             default=argparse.SUPPRESS)
         parser.add_argument(
             '--source-ip-address',
-            help=_('Source ip address or subnet'))
+            help=_('Source IP address or subnet.'))
         parser.add_argument(
             '--destination-ip-address',
-            help=_('Destination ip address or subnet'))
+            help=_('Destination IP address or subnet.'))
         parser.add_argument(
             '--source-port',
-            help=_('Source port (integer in [1, 65535] or range in a:b)'))
+            help=_('Source port (integer in [1, 65535] or range in a:b).'))
         parser.add_argument(
             '--destination-port',
-            help=_('Destination port (integer in [1, 65535] or range in a:b)'))
+            help=_('Destination port (integer in [1, 65535] or range in '
+                   'a:b).'))
         parser.add_argument(
-            '--disabled',
-            dest='enabled',
-            action='store_false',
-            help=_('To disable this rule'),
+            '--enabled',
+            dest='enabled', choices=['True', 'False'],
+            help=_('Whether to enable or disable this rule.'),
             default=argparse.SUPPRESS)
         parser.add_argument(
             '--protocol', choices=['tcp', 'udp', 'icmp', 'any'],
             required=True,
-            help=_('Protocol for the firewall rule'))
+            help=_('Protocol for the firewall rule.'))
         parser.add_argument(
             '--action',
             required=True,
             choices=['allow', 'deny'],
-            help=_('Action for the firewall rule'))
+            help=_('Action for the firewall rule.'))
 
     def args2body(self, parsed_args):
         body = {
@@ -134,13 +130,12 @@ class UpdateFirewallRule(neutronv20.UpdateCommand):
     """Update a given firewall rule."""
 
     resource = 'firewall_rule'
-    log = logging.getLogger(__name__ + '.UpdateFirewallRule')
 
     def add_known_arguments(self, parser):
         parser.add_argument(
             '--protocol', choices=['tcp', 'udp', 'icmp', 'any'],
             required=False,
-            help=_('Protocol for the firewall rule'))
+            help=_('Protocol for the firewall rule.'))
 
     def args2body(self, parsed_args):
         body = {
@@ -158,4 +153,3 @@ class DeleteFirewallRule(neutronv20.DeleteCommand):
     """Delete a given firewall rule."""
 
     resource = 'firewall_rule'
-    log = logging.getLogger(__name__ + '.DeleteFirewallRule')

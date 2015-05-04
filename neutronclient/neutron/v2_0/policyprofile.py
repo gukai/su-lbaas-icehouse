@@ -13,7 +13,8 @@
 #@author Abhishek Raut, Cisco Systems
 #@author Sergey Sudakovich, Cisco Systems
 
-import logging
+from __future__ import print_function
+
 from neutronclient.neutron import v2_0 as neutronV20
 from neutronclient.neutron.v2_0 import parse_args_to_dict
 from neutronclient.openstack.common.gettextutils import _
@@ -25,7 +26,6 @@ class ListPolicyProfile(neutronV20.ListCommand):
     """List policy profiles that belong to a given tenant."""
 
     resource = RESOURCE
-    log = logging.getLogger(__name__ + '.ListProfile')
     _formatters = {}
     list_columns = ['id', 'name']
 
@@ -34,7 +34,6 @@ class ShowPolicyProfile(neutronV20.ShowCommand):
     """Show information of a given policy profile."""
 
     resource = RESOURCE
-    log = logging.getLogger(__name__ + '.ShowProfile')
     allow_names = True
 
 
@@ -42,22 +41,20 @@ class UpdatePolicyProfile(neutronV20.UpdateCommand):
     """Update policy profile's information."""
 
     resource = RESOURCE
-    log = logging.getLogger(__name__ + '.UpdatePolicyProfile')
 
 
 class UpdatePolicyProfileV2(neutronV20.UpdateCommand):
     """Update policy profile's information."""
 
     api = 'network'
-    log = logging.getLogger(__name__ + '.UpdatePolicyProfileV2')
     resource = RESOURCE
 
     def get_parser(self, prog_name):
         parser = super(UpdatePolicyProfileV2, self).get_parser(prog_name)
         parser.add_argument("--add-tenant",
-                            help=_("Add tenant to the policy profile"))
+                            help=_("Add tenant to the policy profile."))
         parser.add_argument("--remove-tenant",
-                            help=_("Remove tenant from the policy profile"))
+                            help=_("Remove tenant from the policy profile."))
         return parser
 
     def run(self, parsed_args):
@@ -71,7 +68,7 @@ class UpdatePolicyProfileV2(neutronV20.UpdateCommand):
             data[self.resource]['remove_tenant'] = parsed_args.remove_tenant
         neutron_client.update_policy_profile(parsed_args.id,
                                              {self.resource: data})
-        print >>self.app.stdout, (
-            _('Updated %(resource)s: %(id)s') %
-            {'id': parsed_args.id, 'resource': self.resource})
+        print((_('Updated %(resource)s: %(id)s') %
+               {'id': parsed_args.id, 'resource': self.resource}),
+              file=self.app.stdout)
         return

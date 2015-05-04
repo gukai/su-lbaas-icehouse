@@ -18,9 +18,10 @@
 ###
 
 import logging
-
 from xml.etree import ElementTree as etree
 from xml.parsers import expat
+
+import six
 
 from neutronclient.common import constants
 from neutronclient.common import exceptions as exception
@@ -28,6 +29,9 @@ from neutronclient.openstack.common.gettextutils import _
 from neutronclient.openstack.common import jsonutils
 
 LOG = logging.getLogger(__name__)
+
+if six.PY3:
+    long = int
 
 
 class ActionDispatcher(object):
@@ -58,7 +62,7 @@ class JSONDictSerializer(DictSerializer):
 
     def default(self, data):
         def sanitizer(obj):
-            return unicode(obj)
+            return six.text_type(obj, 'utf8')
         return jsonutils.dumps(data, default=sanitizer)
 
 
@@ -67,9 +71,9 @@ class XMLDictSerializer(DictSerializer):
     def __init__(self, metadata=None, xmlns=None):
         """XMLDictSerializer constructor.
 
-        :param metadata: information needed to deserialize xml into
+        :param metadata: information needed to deserialize XML into
                          a dictionary.
-        :param xmlns: XML namespace to include with serialized xml
+        :param xmlns: XML namespace to include with serialized XML
         """
         super(XMLDictSerializer, self).__init__()
         self.metadata = metadata or {}
@@ -93,13 +97,13 @@ class XMLDictSerializer(DictSerializer):
                 root_key = constants.VIRTUAL_ROOT_KEY
                 root_value = None
             else:
-                link_keys = [k for k in data.iterkeys() or []
+                link_keys = [k for k in six.iterkeys(data) or []
                              if k.endswith('_links')]
                 if link_keys:
                     links = data.pop(link_keys[0], None)
                     has_atom = True
                 root_key = (len(data) == 1 and
-                            data.keys()[0] or constants.VIRTUAL_ROOT_KEY)
+                            list(data.keys())[0] or constants.VIRTUAL_ROOT_KEY)
                 root_value = data.get(root_key, data)
             doc = etree.Element("_temp_root")
             used_prefixes = []
@@ -123,7 +127,7 @@ class XMLDictSerializer(DictSerializer):
         return etree.tostring(node, encoding='UTF-8')
 
     #NOTE (ameade): the has_atom should be removed after all of the
-    # xml serializers and view builders have been updated to the current
+    # XML serializers and view builders have been updated to the current
     # spec that required all responses include the xmlns:atom, the has_atom
     # flag is to prevent current tests from breaking
     def _add_xmlns(self, node, used_prefixes, has_atom=False):
@@ -191,13 +195,10 @@ class XMLDictSerializer(DictSerializer):
                 result.set(
                     constants.TYPE_ATTR,
                     constants.TYPE_FLOAT)
-            LOG.debug(_("Data %(data)s type is %(type)s"),
+            LOG.debug("Data %(data)s type is %(type)s",
                       {'data': data,
                        'type': type(data)})
-            if isinstance(data, str):
-                result.text = unicode(data, 'utf-8')
-            else:
-                result.text = unicode(data)
+            result.text = six.text_type(data)
         return result
 
     def _create_link_nodes(self, xml_doc, links):
@@ -224,7 +225,7 @@ class JSONDeserializer(TextDeserializer):
             return jsonutils.loads(datastring)
         except ValueError:
             msg = _("Cannot understand JSON")
-            raise exception.MalformedRequestBody(reason=msg)
+            raise exception.MalformedResponseBody(reason=msg)
 
     def default(self, datastring):
         return {'body': self._from_json(datastring)}
@@ -235,7 +236,7 @@ class XMLDeserializer(TextDeserializer):
     def __init__(self, metadata=None):
         """XMLDeserializer constructor.
 
-        :param metadata: information needed to deserialize xml into
+        :param metadata: information needed to deserialize XML into
                          a dictionary.
         """
         super(XMLDeserializer, self).__init__()
@@ -297,7 +298,7 @@ class XMLDeserializer(TextDeserializer):
                 parseError = True
             if parseError:
                 msg = _("Cannot understand XML")
-                raise exception.MalformedRequestBody(reason=msg)
+                raise exception.MalformedResponseBody(reason=msg)
             else:
                 raise
 
@@ -392,7 +393,6 @@ class Serializer(object):
         """Deserialize a string to a dictionary.
 
         The string must be in the format of a supported MIME type.
-
         """
         return self.get_deserialize_handler(content_type).deserialize(
             datastring)

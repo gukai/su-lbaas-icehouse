@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-#
 # Copyright 2013 New Dream Network, LLC (DreamHost)
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -13,11 +11,9 @@
 #    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 #    License for the specific language governing permissions and limitations
 #    under the License.
-#
-# @author: Mark McClain, DreamHost
 
 import itertools
-from six.moves import xrange
+from six import moves
 
 from neutron.agent.linux import utils
 from neutron.plugins.common import constants as qconstants
@@ -33,20 +29,18 @@ PROTOCOL_MAP = {
 BALANCE_MAP = {
     constants.LB_METHOD_ROUND_ROBIN: 'roundrobin',
     constants.LB_METHOD_LEAST_CONNECTIONS: 'leastconn',
-    constants.LB_METHOD_SOURCE_IP: 'source',
-    constants.LB_METHOD_URI_HASH: 'uri'
+    constants.LB_METHOD_SOURCE_IP: 'source'
 }
 
 STATS_MAP = {
-    constants.STATS_ACTIVE_CONNECTIONS: 'qcur',
-    constants.STATS_MAX_CONNECTIONS: 'qmax',
+    constants.STATS_ACTIVE_CONNECTIONS: 'scur',
+    constants.STATS_MAX_CONNECTIONS: 'smax',
     constants.STATS_CURRENT_SESSIONS: 'scur',
     constants.STATS_MAX_SESSIONS: 'smax',
     constants.STATS_TOTAL_CONNECTIONS: 'stot',
     constants.STATS_TOTAL_SESSIONS: 'stot',
     constants.STATS_IN_BYTES: 'bin',
     constants.STATS_OUT_BYTES: 'bout',
-    constants.STATS_REQ_RATE: 'req_rate',
     constants.STATS_CONNECTION_ERRORS: 'econ',
     constants.STATS_RESPONSE_ERRORS: 'eresp'
 }
@@ -83,24 +77,14 @@ def _build_global(config, socket_path=None, user_group='nogroup'):
 
 
 def _build_defaults(config):
-    pool = config['pool']
     opts = [
         'log global',
         'retries 3',
         'option redispatch',
+        'timeout connect 5000',
+        'timeout client 50000',
+        'timeout server 50000',
     ]
-
-    if pool['timeout_connect'] >= 0:
-        opts.append('timeout connect %d' % pool['timeout_connect'])
-
-    if pool['timeout_client'] >= 0:
-        opts.append('timeout client %d' % pool['timeout_client'])
-
-    if pool['timeout_server'] >= 0:
-        opts.append('timeout server %d' % pool['timeout_server'])
-
-    if pool['max_conn'] >= 0:
-        opts.append('maxconn %d' % pool['max_conn'])
 
     return itertools.chain(['defaults'], ('\t' + o for o in opts))
 
@@ -212,7 +196,8 @@ def _get_session_persistence(config):
     if persistence['type'] == constants.SESSION_PERSISTENCE_SOURCE_IP:
         opts.append('stick-table type ip size 10k')
         opts.append('stick on src')
-    elif persistence['type'] == constants.SESSION_PERSISTENCE_HTTP_COOKIE:
+    elif (persistence['type'] == constants.SESSION_PERSISTENCE_HTTP_COOKIE and
+          config.get('members')):
         opts.append('cookie SRV insert indirect nocache')
     elif (persistence['type'] == constants.SESSION_PERSISTENCE_APP_COOKIE and
           persistence.get('cookie_name')):
@@ -243,7 +228,7 @@ def _expand_expected_codes(codes):
             continue
         elif '-' in code:
             low, hi = code.split('-')[:2]
-            retval.update(str(i) for i in xrange(int(low), int(hi) + 1))
+            retval.update(str(i) for i in moves.xrange(int(low), int(hi) + 1))
         else:
             retval.add(code)
     return retval

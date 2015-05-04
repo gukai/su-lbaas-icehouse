@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 # Copyright (c) 2013 OpenStack Foundation.
 # All Rights Reserved.
 #
@@ -39,7 +37,8 @@ class PoolLoadbalancerAgentBinding(model_base.BASEV2):
                         primary_key=True)
     agent = orm.relation(agents_db.Agent)
     agent_id = sa.Column(sa.String(36), sa.ForeignKey("agents.id",
-                                                      ondelete='CASCADE'))
+                                                      ondelete='CASCADE'),
+                         nullable=False)
 
 
 class LbaasAgentSchedulerDbMixin(agentschedulers_db.AgentSchedulerDbMixin,
@@ -69,19 +68,6 @@ class LbaasAgentSchedulerDbMixin(agentschedulers_db.AgentSchedulerDbMixin,
         return [agent
                 for agent in query
                 if self.is_eligible_agent(active, agent)]
-
-    def get_lbaas_agents_dead(self, context, active=None, filters=None):
-        query = context.session.query(agents_db.Agent)
-        query = query.filter_by(agent_type=constants.AGENT_TYPE_LOADBALANCER)
-        if active is not None:
-            query = query.filter_by(admin_state_up=active)
-        if filters:
-            for key, value in filters.iteritems():
-                column = getattr(agents_db.Agent, key, None)
-                if column:
-                    query = query.filter(column.in_(value))
-
-        return [agent for agent in query if not self.is_eligible_agent(True, agent)]
 
     def list_pools_on_lbaas_agent(self, context, id):
         query = context.session.query(PoolLoadbalancerAgentBinding.pool_id)

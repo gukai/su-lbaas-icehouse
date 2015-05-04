@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-#
 # Copyright 2013 OpenStack Foundation.  All rights reserved
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -15,6 +13,7 @@
 #    under the License.
 #
 
+from oslo.db import exception
 import sqlalchemy as sa
 from sqlalchemy import orm
 from sqlalchemy.orm import exc
@@ -22,14 +21,12 @@ from sqlalchemy.orm import validates
 
 from neutron.api.v2 import attributes
 from neutron.common import exceptions as n_exc
-from neutron.db import db_base_plugin_v2 as base_db
+from neutron.db import common_db_mixin as base_db
 from neutron.db import model_base
 from neutron.db import models_v2
 from neutron.db import servicetype_db as st_db
 from neutron.extensions import loadbalancer
-from neutron.extensions.loadbalancer import LoadBalancerPluginBase
 from neutron import manager
-from neutron.openstack.common.db import exception
 from neutron.openstack.common import excutils
 from neutron.openstack.common import log as logging
 from neutron.openstack.common import uuidutils
@@ -62,10 +59,9 @@ class PoolStatistics(model_base.BASEV2):
     bytes_out = sa.Column(sa.BigInteger, nullable=False)
     active_connections = sa.Column(sa.BigInteger, nullable=False)
     total_connections = sa.Column(sa.BigInteger, nullable=False)
-    request_rate = sa.Column(sa.BigInteger, nullable=False)
 
     @validates('bytes_in', 'bytes_out',
-               'active_connections', 'total_connections', 'request_rate')
+               'active_connections', 'total_connections')
     def validate_non_negative_int(self, key, value):
         if value < 0:
             data = {'key': key, 'value': value}
@@ -124,14 +120,9 @@ class Pool(model_base.BASEV2, models_v2.HasId, models_v2.HasTenant,
     lb_method = sa.Column(sa.Enum("ROUND_ROBIN",
                                   "LEAST_CONNECTIONS",
                                   "SOURCE_IP",
-                                  "URI_HASH",
                                   name="pools_lb_method"),
                           nullable=False)
     admin_state_up = sa.Column(sa.Boolean(), nullable=False)
-    timeout_connect = sa.Column(sa.Integer, nullable=False)
-    timeout_client = sa.Column(sa.Integer, nullable=False)
-    timeout_server = sa.Column(sa.Integer, nullable=False)
-    max_conn = sa.Column(sa.Integer, nullable=False)
     stats = orm.relationship(PoolStatistics,
                              uselist=False,
                              backref="pools",
@@ -183,7 +174,7 @@ class PoolMonitorAssociation(model_base.BASEV2,
                            primary_key=True)
 
 
-class LoadBalancerPluginDb(LoadBalancerPluginBase,
+class LoadBalancerPluginDb(loadbalancer.LoadBalancerPluginBase,
                            base_db.CommonDbMixin):
     """Wraps loadbalancer with SQLAlchemy models.
 
@@ -241,7 +232,10 @@ class LoadBalancerPluginDb(LoadBalancerPluginBase,
     ########################################################
     # VIP DB access
     def _make_vip_dict(self, vip, fields=None):
-        fixed_ip = (vip.port.fixed_ips or [{}])[0]
+        fixed_ip = {}
+        # it's possible that vip doesn't have created port yet
+        if vip.port:
+            fixed_ip = (vip.port.fixed_ips or [{}])[0]
 
         res = {'id': vip['id'],
                'tenant_id': vip['tenant_id'],
@@ -327,25 +321,27 @@ class LoadBalancerPluginDb(LoadBalancerPluginBase,
             sess_qry.filter_by(vip_id=vip_id).delete()
 
     def _create_port_for_vip(self, context, vip_db, subnet_id, ip_address):
-            # resolve subnet and create port
-            subnet = self._core_plugin.get_subnet(context, subnet_id)
-            fixed_ip = {'subnet_id': subnet['id']}
-            if ip_address and ip_address != attributes.ATTR_NOT_SPECIFIED:
-                fixed_ip['ip_address'] = ip_address
+        # resolve subnet and create port
+        subnet = self._core_plugin.get_subnet(context, subnet_id)
+        fixed_ip = {'subnet_id': subnet['id']}
+        if ip_address and ip_address != attributes.ATTR_NOT_SPECIFIED:
+            fixed_ip['ip_address'] = ip_address
 
-            port_data = {
-                'tenant_id': vip_db.tenant_id,
-                'name': 'vip-' + vip_db.id,
-                'network_id': subnet['network_id'],
-                'mac_address': attributes.ATTR_NOT_SPECIFIED,
-                'admin_state_up': False,
-                'device_id': '',
-                'device_owner': '',
-                'fixed_ips': [fixed_ip]
-            }
+        port_data = {
+            'tenant_id': vip_db.tenant_id,
+            'name': 'vip-' + vip_db.id,
+            'network_id': subnet['network_id'],
+            'mac_address': attributes.ATTR_NOT_SPECIFIED,
+            'admin_state_up': False,
+            'device_id': '',
+            'device_owner': '',
+            'fixed_ips': [fixed_ip]
+        }
 
-            port = self._core_plugin.create_port(context, {'port': port_data})
-            vip_db.port_id = port['id']
+        port = self._core_plugin.create_port(context, {'port': port_data})
+        vip_db.port_id = port['id']
+        # explicitly sync session with db
+        context.session.flush()
 
     def create_vip(self, context, vip):
         v = vip['vip']
@@ -365,9 +361,6 @@ class LoadBalancerPluginDb(LoadBalancerPluginBase,
                 if pool['status'] == constants.PENDING_DELETE:
                     raise loadbalancer.StateInvalid(state=pool['status'],
                                                     id=pool['id'])
-            else:
-                pool = None
-
             vip_db = Vip(id=uuidutils.generate_uuid(),
                          tenant_id=tenant_id,
                          name=v['name'],
@@ -394,16 +387,26 @@ class LoadBalancerPluginDb(LoadBalancerPluginBase,
             except exception.DBDuplicateEntry:
                 raise loadbalancer.VipExists(pool_id=v['pool_id'])
 
+        try:
             # create a port to reserve address for IPAM
+            # do it outside the transaction to avoid rpc calls
             self._create_port_for_vip(
-                context,
-                vip_db,
-                v['subnet_id'],
-                v.get('address')
-            )
+                context, vip_db, v['subnet_id'], v.get('address'))
+        except Exception:
+            # catch any kind of exceptions
+            with excutils.save_and_reraise_exception():
+                context.session.delete(vip_db)
+                context.session.flush()
 
-            if pool:
-                pool['vip_id'] = vip_db['id']
+        if v['pool_id']:
+            # fetching pool again
+            pool = self._get_resource(context, Pool, v['pool_id'])
+            # (NOTE): we rely on the fact that pool didn't change between
+            # above block and here
+            vip_db['pool_id'] = v['pool_id']
+            pool['vip_id'] = vip_db['id']
+            # explicitly flush changes as we're outside any transaction
+            context.session.flush()
 
         return self._make_vip_dict(vip_db)
 
@@ -469,8 +472,8 @@ class LoadBalancerPluginDb(LoadBalancerPluginBase,
                 pool.update({"vip_id": None})
 
             context.session.delete(vip)
-            if vip.port:  # this is a Neutron port
-                self._core_plugin.delete_port(context, vip.port.id)
+        if vip.port:  # this is a Neutron port
+            self._core_plugin.delete_port(context, vip.port.id)
 
     def get_vip(self, context, id, fields=None):
         vip = self._get_resource(context, Vip, id)
@@ -493,10 +496,6 @@ class LoadBalancerPluginDb(LoadBalancerPluginBase,
                'vip_id': pool['vip_id'],
                'lb_method': pool['lb_method'],
                'admin_state_up': pool['admin_state_up'],
-               'timeout_connect': pool['timeout_connect'],
-               'timeout_client': pool['timeout_client'],
-               'timeout_server': pool['timeout_server'],
-               'max_conn': pool['max_conn'],
                'status': pool['status'],
                'status_description': pool['status_description'],
                'provider': ''
@@ -541,8 +540,7 @@ class LoadBalancerPluginDb(LoadBalancerPluginBase,
             bytes_in=data.get(lb_const.STATS_IN_BYTES, 0),
             bytes_out=data.get(lb_const.STATS_OUT_BYTES, 0),
             active_connections=data.get(lb_const.STATS_ACTIVE_CONNECTIONS, 0),
-            total_connections=data.get(lb_const.STATS_TOTAL_CONNECTIONS, 0),
-            request_rate=data.get(lb_const.STATS_REQ_RATE, 0) 
+            total_connections=data.get(lb_const.STATS_TOTAL_CONNECTIONS, 0)
         )
         return stats_db
 
@@ -570,10 +568,6 @@ class LoadBalancerPluginDb(LoadBalancerPluginBase,
                            protocol=v['protocol'],
                            lb_method=v['lb_method'],
                            admin_state_up=v['admin_state_up'],
-                           timeout_connect=v['timeout_connect'],
-                           timeout_client=v['timeout_client'],
-                           timeout_server=v['timeout_server'],
-                           max_conn=v['max_conn'],
                            status=constants.PENDING_CREATE)
             pool_db.stats = self._create_pool_stats(context, pool_db['id'])
             context.session.add(pool_db)
@@ -621,8 +615,7 @@ class LoadBalancerPluginDb(LoadBalancerPluginBase,
         res = {lb_const.STATS_IN_BYTES: stats['bytes_in'],
                lb_const.STATS_OUT_BYTES: stats['bytes_out'],
                lb_const.STATS_ACTIVE_CONNECTIONS: stats['active_connections'],
-               lb_const.STATS_TOTAL_CONNECTIONS: stats['total_connections'],
-               lb_const.STATS_REQ_RATE: stats['request_rate']}
+               lb_const.STATS_TOTAL_CONNECTIONS: stats['total_connections']}
         return {'stats': res}
 
     def create_pool_health_monitor(self, context, health_monitor, pool_id):

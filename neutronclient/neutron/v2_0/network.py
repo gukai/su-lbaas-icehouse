@@ -15,7 +15,6 @@
 #
 
 import argparse
-import logging
 
 from neutronclient.common import exceptions
 from neutronclient.neutron import v2_0 as neutronV20
@@ -26,7 +25,7 @@ def _format_subnets(network):
     try:
         return '\n'.join([' '.join([s['id'], s.get('cidr', '')])
                           for s in network['subnets']])
-    except Exception:
+    except (TypeError, KeyError):
         return ''
 
 
@@ -37,7 +36,6 @@ class ListNetwork(neutronV20.ListCommand):
     # id=<uuid>& (with len(uuid)=36)
     subnet_id_filter_len = 40
     resource = 'network'
-    log = logging.getLogger(__name__ + '.ListNetwork')
     _formatters = {'subnets': _format_subnets, }
     list_columns = ['id', 'name', 'subnets']
     pagination_support = True
@@ -70,7 +68,7 @@ class ListNetwork(neutronV20.ListCommand):
             subnet_count = len(subnet_ids)
             max_size = ((self.subnet_id_filter_len * subnet_count) -
                         uri_len_exc.excess)
-            chunk_size = max_size / self.subnet_id_filter_len
+            chunk_size = max_size // self.subnet_id_filter_len
             subnets = []
             for i in range(0, subnet_count, chunk_size):
                 subnets.extend(
@@ -86,7 +84,6 @@ class ListNetwork(neutronV20.ListCommand):
 class ListExternalNetwork(ListNetwork):
     """List external networks that belong to a given tenant."""
 
-    log = logging.getLogger(__name__ + '.ListExternalNetwork')
     pagination_support = True
     sorting_support = True
 
@@ -101,20 +98,18 @@ class ShowNetwork(neutronV20.ShowCommand):
     """Show information of a given network."""
 
     resource = 'network'
-    log = logging.getLogger(__name__ + '.ShowNetwork')
 
 
 class CreateNetwork(neutronV20.CreateCommand):
     """Create a network for a given tenant."""
 
     resource = 'network'
-    log = logging.getLogger(__name__ + '.CreateNetwork')
 
     def add_known_arguments(self, parser):
         parser.add_argument(
             '--admin-state-down',
             dest='admin_state', action='store_false',
-            help=_('Set Admin State Up to false'))
+            help=_('Set admin state up to false.'))
         parser.add_argument(
             '--admin_state_down',
             dest='admin_state', action='store_false',
@@ -122,11 +117,11 @@ class CreateNetwork(neutronV20.CreateCommand):
         parser.add_argument(
             '--shared',
             action='store_true',
-            help=_('Set the network as shared'),
+            help=_('Set the network as shared.'),
             default=argparse.SUPPRESS)
         parser.add_argument(
             'name', metavar='NAME',
-            help=_('Name of network to create'))
+            help=_('Name of network to create.'))
 
     def args2body(self, parsed_args):
         body = {'network': {
@@ -140,12 +135,10 @@ class CreateNetwork(neutronV20.CreateCommand):
 class DeleteNetwork(neutronV20.DeleteCommand):
     """Delete a given network."""
 
-    log = logging.getLogger(__name__ + '.DeleteNetwork')
     resource = 'network'
 
 
 class UpdateNetwork(neutronV20.UpdateCommand):
     """Update network's information."""
 
-    log = logging.getLogger(__name__ + '.UpdateNetwork')
     resource = 'network'

@@ -15,8 +15,8 @@
 #
 
 import argparse
-import logging
 
+from neutronclient.common import exceptions
 from neutronclient.neutron import v2_0 as neutronV20
 from neutronclient.openstack.common.gettextutils import _
 
@@ -25,7 +25,6 @@ class ListSecurityGroup(neutronV20.ListCommand):
     """List security groups that belong to a given tenant."""
 
     resource = 'security_group'
-    log = logging.getLogger(__name__ + '.ListSecurityGroup')
     list_columns = ['id', 'name', 'description']
     pagination_support = True
     sorting_support = True
@@ -35,7 +34,6 @@ class ShowSecurityGroup(neutronV20.ShowCommand):
     """Show information of a given security group."""
 
     resource = 'security_group'
-    log = logging.getLogger(__name__ + '.ShowSecurityGroup')
     allow_names = True
 
 
@@ -43,15 +41,14 @@ class CreateSecurityGroup(neutronV20.CreateCommand):
     """Create a security group."""
 
     resource = 'security_group'
-    log = logging.getLogger(__name__ + '.CreateSecurityGroup')
 
     def add_known_arguments(self, parser):
         parser.add_argument(
             'name', metavar='NAME',
-            help=_('Name of security group'))
+            help=_('Name of security group.'))
         parser.add_argument(
             '--description',
-            help=_('Description of security group'))
+            help=_('Description of security group.'))
 
     def args2body(self, parsed_args):
         body = {'security_group': {
@@ -67,7 +64,6 @@ class CreateSecurityGroup(neutronV20.CreateCommand):
 class DeleteSecurityGroup(neutronV20.DeleteCommand):
     """Delete a given security group."""
 
-    log = logging.getLogger(__name__ + '.DeleteSecurityGroup')
     resource = 'security_group'
     allow_names = True
 
@@ -75,16 +71,15 @@ class DeleteSecurityGroup(neutronV20.DeleteCommand):
 class UpdateSecurityGroup(neutronV20.UpdateCommand):
     """Update a given security group."""
 
-    log = logging.getLogger(__name__ + '.UpdateSecurityGroup')
     resource = 'security_group'
 
     def add_known_arguments(self, parser):
         parser.add_argument(
             '--name',
-            help=_('Name of security group'))
+            help=_('Name of security group.'))
         parser.add_argument(
             '--description',
-            help=_('Description of security group'))
+            help=_('Description of security group.'))
 
     def args2body(self, parsed_args):
         body = {'security_group': {}}
@@ -101,7 +96,6 @@ class ListSecurityGroupRule(neutronV20.ListCommand):
     """List security group rules that belong to a given tenant."""
 
     resource = 'security_group_rule'
-    log = logging.getLogger(__name__ + '.ListSecurityGroupRule')
     list_columns = ['id', 'security_group_id', 'direction', 'protocol',
                     'remote_ip_prefix', 'remote_group_id']
     replace_rules = {'security_group_id': 'security_group',
@@ -113,7 +107,7 @@ class ListSecurityGroupRule(neutronV20.ListCommand):
         parser = super(ListSecurityGroupRule, self).get_parser(prog_name)
         parser.add_argument(
             '--no-nameconv', action='store_true',
-            help=_('Do not convert security group ID to its name'))
+            help=_('Do not convert security group ID to its name.'))
         return parser
 
     @staticmethod
@@ -141,9 +135,31 @@ class ListSecurityGroupRule(neutronV20.ListCommand):
         for rule in data:
             for key in self.replace_rules:
                 sec_group_ids.add(rule[key])
-        search_opts.update({"id": sec_group_ids})
-        secgroups = neutron_client.list_security_groups(**search_opts)
-        secgroups = secgroups.get('security_groups', [])
+        sec_group_ids = list(sec_group_ids)
+
+        def _get_sec_group_list(sec_group_ids):
+            search_opts['id'] = sec_group_ids
+            return neutron_client.list_security_groups(
+                **search_opts).get('security_groups', [])
+
+        try:
+            secgroups = _get_sec_group_list(sec_group_ids)
+        except exceptions.RequestURITooLong as uri_len_exc:
+            # Length of a query filter on security group rule id
+            # id=<uuid>& (with len(uuid)=36)
+            sec_group_id_filter_len = 40
+            # The URI is too long because of too many sec_group_id filters
+            # Use the excess attribute of the exception to know how many
+            # sec_group_id filters can be inserted into a single request
+            sec_group_count = len(sec_group_ids)
+            max_size = ((sec_group_id_filter_len * sec_group_count) -
+                        uri_len_exc.excess)
+            chunk_size = max_size // sec_group_id_filter_len
+            secgroups = []
+            for i in range(0, sec_group_count, chunk_size):
+                secgroups.extend(
+                    _get_sec_group_list(sec_group_ids[i: i + chunk_size]))
+
         sg_dict = dict([(sg['id'], sg['name'])
                         for sg in secgroups if sg['name']])
         for rule in data:
@@ -170,7 +186,6 @@ class ShowSecurityGroupRule(neutronV20.ShowCommand):
     """Show information of a given security group rule."""
 
     resource = 'security_group_rule'
-    log = logging.getLogger(__name__ + '.ShowSecurityGroupRule')
     allow_names = False
 
 
@@ -178,44 +193,43 @@ class CreateSecurityGroupRule(neutronV20.CreateCommand):
     """Create a security group rule."""
 
     resource = 'security_group_rule'
-    log = logging.getLogger(__name__ + '.CreateSecurityGroupRule')
 
     def add_known_arguments(self, parser):
         parser.add_argument(
             'security_group_id', metavar='SECURITY_GROUP',
-            help=_('Security group name or id to add rule.'))
+            help=_('Security group name or ID to add rule.'))
         parser.add_argument(
             '--direction',
             default='ingress', choices=['ingress', 'egress'],
-            help=_('Direction of traffic: ingress/egress'))
+            help=_('Direction of traffic: ingress/egress.'))
         parser.add_argument(
             '--ethertype',
             default='IPv4',
             help=_('IPv4/IPv6'))
         parser.add_argument(
             '--protocol',
-            help=_('Protocol of packet'))
+            help=_('Protocol of packet.'))
         parser.add_argument(
             '--port-range-min',
-            help=_('Starting port range'))
+            help=_('Starting port range.'))
         parser.add_argument(
             '--port_range_min',
             help=argparse.SUPPRESS)
         parser.add_argument(
             '--port-range-max',
-            help=_('Ending port range'))
+            help=_('Ending port range.'))
         parser.add_argument(
             '--port_range_max',
             help=argparse.SUPPRESS)
         parser.add_argument(
             '--remote-ip-prefix',
-            help=_('CIDR to match on'))
+            help=_('CIDR to match on.'))
         parser.add_argument(
             '--remote_ip_prefix',
             help=argparse.SUPPRESS)
         parser.add_argument(
             '--remote-group-id', metavar='REMOTE_GROUP',
-            help=_('Remote security group name or id to apply rule'))
+            help=_('Remote security group name or ID to apply rule.'))
         parser.add_argument(
             '--remote_group_id',
             help=argparse.SUPPRESS)
@@ -254,6 +268,5 @@ class CreateSecurityGroupRule(neutronV20.CreateCommand):
 class DeleteSecurityGroupRule(neutronV20.DeleteCommand):
     """Delete a given security group rule."""
 
-    log = logging.getLogger(__name__ + '.DeleteSecurityGroupRule')
     resource = 'security_group_rule'
     allow_names = False

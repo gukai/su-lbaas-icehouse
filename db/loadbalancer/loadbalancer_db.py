@@ -59,9 +59,10 @@ class PoolStatistics(model_base.BASEV2):
     bytes_out = sa.Column(sa.BigInteger, nullable=False)
     active_connections = sa.Column(sa.BigInteger, nullable=False)
     total_connections = sa.Column(sa.BigInteger, nullable=False)
+    request_rate = sa.Column(sa.BigInteger, nullable=False)
 
     @validates('bytes_in', 'bytes_out',
-               'active_connections', 'total_connections')
+               'active_connections', 'total_connections', 'request_rate')
     def validate_non_negative_int(self, key, value):
         if value < 0:
             data = {'key': key, 'value': value}
@@ -120,9 +121,14 @@ class Pool(model_base.BASEV2, models_v2.HasId, models_v2.HasTenant,
     lb_method = sa.Column(sa.Enum("ROUND_ROBIN",
                                   "LEAST_CONNECTIONS",
                                   "SOURCE_IP",
+                                  "URI_HASH",
                                   name="pools_lb_method"),
                           nullable=False)
     admin_state_up = sa.Column(sa.Boolean(), nullable=False)
+    timeout_connect = sa.Column(sa.Integer, nullable=False)
+    timeout_client = sa.Column(sa.Integer, nullable=False)
+    timeout_server = sa.Column(sa.Integer, nullable=False)
+    max_conn = sa.Column(sa.Integer, nullable=False)
     stats = orm.relationship(PoolStatistics,
                              uselist=False,
                              backref="pools",
@@ -496,6 +502,10 @@ class LoadBalancerPluginDb(loadbalancer.LoadBalancerPluginBase,
                'vip_id': pool['vip_id'],
                'lb_method': pool['lb_method'],
                'admin_state_up': pool['admin_state_up'],
+               'timeout_connect': pool['timeout_connect'],
+               'timeout_client': pool['timeout_client'],
+               'timeout_server': pool['timeout_server'],
+               'max_conn': pool['max_conn'],
                'status': pool['status'],
                'status_description': pool['status_description'],
                'provider': ''
@@ -541,7 +551,7 @@ class LoadBalancerPluginDb(loadbalancer.LoadBalancerPluginBase,
             bytes_in=data.get(lb_const.STATS_IN_BYTES, 0),
             bytes_out=data.get(lb_const.STATS_OUT_BYTES, 0),
             active_connections=data.get(lb_const.STATS_ACTIVE_CONNECTIONS, 0),
-            total_connections=data.get(lb_const.STATS_TOTAL_CONNECTIONS, 0)
+            total_connections=data.get(lb_const.STATS_TOTAL_CONNECTIONS, 0),
             request_rate=data.get(lb_const.STATS_REQ_RATE, 0)
         )
         return stats_db
@@ -570,6 +580,10 @@ class LoadBalancerPluginDb(loadbalancer.LoadBalancerPluginBase,
                            protocol=v['protocol'],
                            lb_method=v['lb_method'],
                            admin_state_up=v['admin_state_up'],
+                           timeout_connect=v['timeout_connect'],
+                           timeout_client=v['timeout_client'],
+                           timeout_server=v['timeout_server'],
+                           max_conn=v['max_conn'],
                            status=constants.PENDING_CREATE)
             pool_db.stats = self._create_pool_stats(context, pool_db['id'])
             context.session.add(pool_db)
@@ -617,7 +631,8 @@ class LoadBalancerPluginDb(loadbalancer.LoadBalancerPluginBase,
         res = {lb_const.STATS_IN_BYTES: stats['bytes_in'],
                lb_const.STATS_OUT_BYTES: stats['bytes_out'],
                lb_const.STATS_ACTIVE_CONNECTIONS: stats['active_connections'],
-               lb_const.STATS_TOTAL_CONNECTIONS: stats['total_connections']}
+               lb_const.STATS_TOTAL_CONNECTIONS: stats['total_connections'],
+               lb_const.STATS_REQ_RATE: stats['request_rate']}
         return {'stats': res}
 
     def create_pool_health_monitor(self, context, health_monitor, pool_id):

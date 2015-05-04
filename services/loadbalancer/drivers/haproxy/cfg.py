@@ -29,7 +29,8 @@ PROTOCOL_MAP = {
 BALANCE_MAP = {
     constants.LB_METHOD_ROUND_ROBIN: 'roundrobin',
     constants.LB_METHOD_LEAST_CONNECTIONS: 'leastconn',
-    constants.LB_METHOD_SOURCE_IP: 'source'
+    constants.LB_METHOD_SOURCE_IP: 'source',
+    constants.LB_METHOD_URI_HASH: 'uri'
 }
 
 STATS_MAP = {
@@ -41,6 +42,7 @@ STATS_MAP = {
     constants.STATS_TOTAL_SESSIONS: 'stot',
     constants.STATS_IN_BYTES: 'bin',
     constants.STATS_OUT_BYTES: 'bout',
+    constants.STATS_REQ_RATE: 'req_rate',
     constants.STATS_CONNECTION_ERRORS: 'econ',
     constants.STATS_RESPONSE_ERRORS: 'eresp'
 }
@@ -77,14 +79,24 @@ def _build_global(config, socket_path=None, user_group='nogroup'):
 
 
 def _build_defaults(config):
+    pool = config['pool']
     opts = [
         'log global',
         'retries 3',
         'option redispatch',
-        'timeout connect 5000',
-        'timeout client 50000',
-        'timeout server 50000',
     ]
+
+    if pool['timeout_connect'] >= 0:
+        opts.append('timeout connect %d' % pool['timeout_connect'])
+
+    if pool['timeout_client'] >= 0:
+        opts.append('timeout client %d' % pool['timeout_client'])
+
+    if pool['timeout_server'] >= 0:
+        opts.append('timeout server %d' % pool['timeout_server'])
+
+    if pool['max_conn'] >= 0:
+        opts.append('maxconn %d' % pool['max_conn'])
 
     return itertools.chain(['defaults'], ('\t' + o for o in opts))
 

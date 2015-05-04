@@ -524,6 +524,7 @@ class LoadBalancerPluginDb(loadbalancer.LoadBalancerPluginBase,
             pool_db = self._get_resource(context, Pool, pool_id)
             self.assert_modification_allowed(pool_db)
             pool_db.stats = self._create_pool_stats(context, pool_id, data)
+            total_conn = data.get('total_connections')
 
             for member, stats in data.get('members', {}).items():
                 stats_status = stats.get(lb_const.STATS_STATUS)
@@ -541,6 +542,7 @@ class LoadBalancerPluginDb(loadbalancer.LoadBalancerPluginBase,
             bytes_out=data.get(lb_const.STATS_OUT_BYTES, 0),
             active_connections=data.get(lb_const.STATS_ACTIVE_CONNECTIONS, 0),
             total_connections=data.get(lb_const.STATS_TOTAL_CONNECTIONS, 0)
+            request_rate=data.get(lb_const.STATS_REQ_RATE, 0)
         )
         return stats_db
 

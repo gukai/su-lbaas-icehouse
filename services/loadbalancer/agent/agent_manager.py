@@ -36,6 +36,9 @@ OPTS = [
                  '.haproxy.namespace_driver.HaproxyNSDriver'],
         help=_('Drivers used to manage loadbalancing devices'),
     ),
+    cfg.BoolOpt('enable_ha_reschedule', default=False,
+                    help=_("Rescchedule to another agent in HA environment.")
+    ),
 ]
 
 
@@ -121,10 +124,26 @@ class LbaasAgentManager(n_rpc.RpcCallback, periodic_task.PeriodicTasks):
     def initialize_service_hook(self, started_by):
         self.sync_state()
 
-    @periodic_task.periodic_task
+    @periodic_task.periodic_task(spacing=15)
+    def ha_reschedule_pool(self, context):
+        if cfg.CONF.enable_ha_reschedule:
+            self.plugin_rpc.ha_reschedule_pool()
+        known_instances = set(self.instance_mapping.keys())
+        memory_instances = set(self.plugin_rpc.get_ready_devices())
+
+        reschedule_instances = memory_instances - known_instances
+        if not reschedule_instances:
+            return []
+        else:
+            LOG.debug("Try to reschedule pool %s here.")
+        for pool_id in reschedule_instances:
+            self._reload_pool(pool_id)
+
+    @periodic_task.periodic_task(spacing=10)
     def periodic_resync(self, context):
         if self.needs_resync:
             self.needs_resync = False
+            LOG.debug("start to sync stats in resync periodict task.")
             self.sync_state()
 
     @periodic_task.periodic_task(spacing=6)
@@ -139,6 +158,7 @@ class LbaasAgentManager(n_rpc.RpcCallback, periodic_task.PeriodicTasks):
                 LOG.exception(_('Error updating statistics on pool %s'),
                               pool_id)
                 self.needs_resync = True
+
 
     def sync_state(self):
         known_instances = set(self.instance_mapping.keys())
@@ -169,7 +189,7 @@ class LbaasAgentManager(n_rpc.RpcCallback, periodic_task.PeriodicTasks):
             logical_config = self.plugin_rpc.get_logical_device(pool_id)
             driver_name = logical_config['driver']
             if driver_name not in self.device_drivers:
-                LOG.error(_('No device driver '
+                LOG.debug(_('No device driver '
                             'on agent: %s.'), driver_name)
                 self.plugin_rpc.update_status(
                     'pool', pool_id, constants.ERROR)

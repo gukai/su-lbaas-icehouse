@@ -164,19 +164,22 @@ class HaproxyNSDriver(agent_device_driver.AgentDeviceDriver):
             parsed_stats = self._get_stats_from_socket(
                 socket_path,
                 entity_type=TYPE_BACKEND_REQUEST | TYPE_SERVER_REQUEST)
-            pool_stats = self._get_backend_stats(parsed_stats)
+            pool_stats = self._get_backend_stats(parsed_stats, pool_id)
             pool_stats['members'] = self._get_servers_stats(parsed_stats)
             return pool_stats
         else:
             LOG.warn(_('Stats socket not found for pool %s'), pool_id)
+            #raise
             return {}
 
-    def _get_backend_stats(self, parsed_stats):
+    def _get_backend_stats(self, parsed_stats, pool_id):
         TYPE_BACKEND_RESPONSE = '1'
         for stats in parsed_stats:
             if stats.get('type') == TYPE_BACKEND_RESPONSE:
                 unified_stats = dict((k, stats.get(v, ''))
                                      for k, v in hacfg.STATS_MAP.items())
+                if not unified_stats['request_rate']:
+                    unified_stats['request_rate'] = 0
                 return unified_stats
 
         return {}
@@ -211,7 +214,8 @@ class HaproxyNSDriver(agent_device_driver.AgentDeviceDriver):
             return self._parse_stats(raw_stats)
         except socket.error as e:
             LOG.warn(_('Error while connecting to stats socket: %s'), e)
-            return {}
+            raise socket.error
+            #return {}
 
     def _parse_stats(self, raw_stats):
         stat_lines = raw_stats.splitlines()
@@ -236,9 +240,26 @@ class HaproxyNSDriver(agent_device_driver.AgentDeviceDriver):
                 os.makedirs(conf_dir, 0o755)
         return os.path.join(conf_dir, kind)
 
+    #Add by gukai  - 2015-2-27
+    #if someone delete a namespce which have running processes in it,
+    # every command exec in namespace return  Invalid_Argument ERROR.
+    def _fix_Invalid_Argument_namespace(self, namespace):
+        LOG.error("gukai try to delete the namespace")
+        ns = ip_lib.IPWrapper(self.root_helper, namespace)
+        if not ns.netns.exists(namespace):
+            return
+        testcmd = ['ip', 'addr', "show"]
+        try:
+            ns.netns.execute(testcmd)
+        except Exception:
+            ns.netns.delete(namespace)
+
     def _plug(self, namespace, port, reuse_existing=True):
+        self._fix_Invalid_Argument_namespace(namespace)
+
         self.plugin_rpc.plug_vip_port(port['id'])
         interface_name = self.vif_driver.get_device_name(Wrap(port))
+
 
         if ip_lib.device_exists(interface_name, self.root_helper, namespace):
             if not reuse_existing:

@@ -13,7 +13,6 @@
 #    under the License.
 
 import uuid
-
 from oslo.config import cfg
 
 from neutron.common import constants as q_const
@@ -28,6 +27,8 @@ from neutron.openstack.common import importutils
 from neutron.openstack.common import log as logging
 from neutron.plugins.common import constants
 from neutron.services.loadbalancer.drivers import abstract_driver
+import random
+from neutron.services.loadbalancer.agent_scheduler import PoolLoadbalancerAgentBinding
 
 LOG = logging.getLogger(__name__)
 
@@ -229,7 +230,41 @@ class LoadBalancerCallbacks(n_rpc.RpcCallback):
     def update_pool_stats(self, context, pool_id=None, stats=None, host=None):
         self.plugin.update_pool_stats(context, pool_id, data=stats)
 
+    def ha_reschedule_pool(self, context, host=None):
+         with context.session.begin(subtransactions=True):
+             LOG.debug("Call the reschedule callback.")
+             dead_agents = self.plugin.get_lbaas_agents_dead(context)
+             active_agents = self.plugin.get_lbaas_agents(context, active=True)
+             if not dead_agents:
+                 return []
 
+             dead_pool_ids = []
+             for agent in dead_agents:
+                 pools = self.plugin.list_pools_on_lbaas_agent(context,agent.id)
+                 pool_ids = [pool['id'] for pool in pools['pools']]
+                 dead_pool_ids = dead_pool_ids + pool_ids
+             if not dead_pool_ids:
+                 return []
+             else:
+                 LOG.debug(_('Try to reschedule dead Agent : %s.'), dead_agents) 
+                 LOG.debug(_('Try to reschedule pools in dead Agent : %s.'), dead_pool_ids)
+
+             query_binding = context.session.query(PoolLoadbalancerAgentBinding)
+          
+             for dead_pool in dead_pool_ids:
+                 dead_pool_conf = self.get_logical_device(context, pool_id=dead_pool)
+                 dead_pool_driver = dead_pool_conf['driver']
+                 candidates = self.plugin.get_lbaas_agent_candidates(dead_pool_driver, active_agents)
+                 chosen_agent = random.choice(candidates)
+                 msg = "Pool %s will Migrate to %s." %(dead_pool, chosen_agent.id)
+                 LOG.debug(msg)
+                 dead_binding = query_binding.get(dead_pool)
+                 LOG.debug(_('yuan binging in  : %s.'), dead_binding.agent_id)
+                 dead_binding.agent = chosen_agent
+                 dead_binding.agent_id = chosen_agent.id
+             
+
+        
 class LoadBalancerAgentApi(n_rpc.RpcProxy):
     """Plugin side of plugin to agent RPC API."""
 

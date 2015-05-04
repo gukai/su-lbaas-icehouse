@@ -13,6 +13,8 @@
 #    under the License.
 
 from neutron.common import rpc as n_rpc
+from neutron.openstack.common import log as logging
+LOG = logging.getLogger(__name__)
 
 
 class LbaasAgentApi(n_rpc.RpcProxy):
@@ -85,4 +87,9 @@ class LbaasAgentApi(n_rpc.RpcProxy):
                 stats=stats,
                 host=self.host
             )
+        )
+    def ha_reschedule_pool(self):
+        return self.call(
+            self.context,
+            self.make_msg('ha_reschedule_pool', host=self.host)
         )

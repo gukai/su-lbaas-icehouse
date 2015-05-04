@@ -69,6 +69,19 @@ class LbaasAgentSchedulerDbMixin(agentschedulers_db.AgentSchedulerDbMixin,
                 for agent in query
                 if self.is_eligible_agent(active, agent)]
 
+    def get_lbaas_agents_dead(self, context, active=None, filters=None):
+        query = context.session.query(agents_db.Agent)
+        query = query.filter_by(agent_type=constants.AGENT_TYPE_LOADBALANCER)
+        if active is not None:
+            query = query.filter_by(admin_state_up=active)
+        if filters:
+            for key, value in filters.iteritems():
+                column = getattr(agents_db.Agent, key, None)
+                if column:
+                    query = query.filter(column.in_(value))
+
+        return [agent for agent in query if not self.is_eligible_agent(True, agent)]
+
     def list_pools_on_lbaas_agent(self, context, id):
         query = context.session.query(PoolLoadbalancerAgentBinding.pool_id)
         query = query.filter_by(agent_id=id)
@@ -98,7 +111,7 @@ class ChanceScheduler(object):
             lbaas_agent = plugin.get_lbaas_agent_hosting_pool(
                 context, pool['id'])
             if lbaas_agent:
-                LOG.debug(_('Pool %(pool_id)s has already been hosted'
+                LOG.error(_('Pool %(pool_id)s has already been hosted'
                             ' by lbaas agent %(agent_id)s'),
                           {'pool_id': pool['id'],
                            'agent_id': lbaas_agent['id']})

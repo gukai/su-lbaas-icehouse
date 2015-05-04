@@ -3,9 +3,9 @@
 server_list="$1"
 
 for server in $server_list; do
-    ssh $server 'ls /root/.ssh/pacemaker-2.pub'
+    ssh $server 'ls /root/.ssh/pack-2.pub'
     if [ $? != 0 ]; then
-        scp /root/.ssh/id_rsa.pub root@${server}:/root/.ssh/pacemaker-2.pub
-        ssh $server 'cat /root/.ssh/pacemaker-2.pub >> /root/.ssh/authorized_keys'
+        scp /root/.ssh/id_rsa.pub root@${server}:/root/.ssh/pack-2.pub
+        ssh $server 'cat /root/.ssh/pack-2.pub >> /root/.ssh/authorized_keys'
     fi
 done

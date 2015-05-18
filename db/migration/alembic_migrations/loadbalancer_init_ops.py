@@ -23,7 +23,7 @@ import sqlalchemy as sa
 protocols = sa.Enum('HTTP', 'HTTPS', 'TCP', name='lb_protocols')
 session_persistence_type = sa.Enum('SOURCE_IP', 'HTTP_COOKIE', 'APP_COOKIE',
                                    name='sesssionpersistences_type')
-lb_methods = sa.Enum('ROUND_ROBIN', 'LEAST_CONNECTIONS', 'SOURCE_IP',
+lb_methods = sa.Enum('ROUND_ROBIN', 'LEAST_CONNECTIONS', 'SOURCE_IP', 'URI_HASH',
                      name='pools_lb_method')
 health_monitor_type = sa.Enum('PING', 'TCP', 'HTTP', 'HTTPS',
                               name='healthmontiors_type')
@@ -74,6 +74,10 @@ def upgrade():
         sa.Column('subnet_id', sa.String(length=36), nullable=False),
         sa.Column('protocol', protocols, nullable=False),
         sa.Column('lb_method', lb_methods, nullable=False),
+        sa.Column('timeout_connect', sa.Integer(), nullable=False),
+        sa.Column('timeout_client', sa.Integer(), nullable=False),
+        sa.Column('timeout_server', sa.Integer(), nullable=False),
+        sa.Column('max_conn', sa.Integer(), nullable=False),
         sa.Column('admin_state_up', sa.Boolean(), nullable=False),
         sa.ForeignKeyConstraint(['vip_id'], ['vips.id'], ),
         sa.PrimaryKeyConstraint('id'))
@@ -128,6 +132,7 @@ def upgrade():
         sa.Column('bytes_out', sa.Integer(), nullable=False),
         sa.Column('active_connections', sa.Integer(), nullable=False),
         sa.Column('total_connections', sa.Integer(), nullable=False),
+        sa.Column('request_rate', sa.Integer(), nullable=False),
         sa.ForeignKeyConstraint(['pool_id'], ['pools.id'], ),
         sa.PrimaryKeyConstraint('pool_id'))
 

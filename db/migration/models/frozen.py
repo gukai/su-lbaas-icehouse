@@ -409,6 +409,7 @@ class PoolStatistics(BASEV2):
     bytes_out = sa.Column(sa.BigInteger, nullable=False)
     active_connections = sa.Column(sa.BigInteger, nullable=False)
     total_connections = sa.Column(sa.BigInteger, nullable=False)
+    request_rate = sa.Column(sa.BigInteger, nullable=False)
 
 
 #neutron/db/loadbalancer/loadbalancer_db.py
@@ -454,9 +455,14 @@ class Pool(BASEV2, HasId, HasTenant, HasStatusDescription):
     lb_method = sa.Column(sa.Enum("ROUND_ROBIN",
                                   "LEAST_CONNECTIONS",
                                   "SOURCE_IP",
+                                  "URI_HASH",
                                   name="pools_lb_method"),
                           nullable=False)
     admin_state_up = sa.Column(sa.Boolean(), nullable=False)
+    timeout_connect = sa.Column(sa.Integer, nullable=False)
+    timeout_client = sa.Column(sa.Integer, nullable=False)
+    timeout_server = sa.Column(sa.Integer, nullable=False)
+    max_conn = sa.Column(sa.Integer, nullable=False)
     stats = orm.relationship(PoolStatistics,
                              uselist=False,
                              backref="pools",

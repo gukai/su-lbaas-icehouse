@@ -79,6 +79,8 @@ class LbaasAgentManager(n_rpc.RpcCallback, periodic_task.PeriodicTasks):
 
         self._setup_state_rpc()
         self.needs_resync = False
+        self.needs_resync_deep = False
+        self.resync_simple_cont = 0
         # pool_id->device_driver_name mapping used to store known instances
         self.instance_mapping = {}
 
@@ -137,14 +139,21 @@ class LbaasAgentManager(n_rpc.RpcCallback, periodic_task.PeriodicTasks):
         else:
             LOG.debug("Try to reschedule pool %s here.")
         for pool_id in reschedule_instances:
-            self._reload_pool(pool_id)
+            self._reload_pool(pool_id, True)
 
     @periodic_task.periodic_task(spacing=10)
     def periodic_resync(self, context):
         if self.needs_resync:
-            self.needs_resync = False
-            LOG.debug("start to sync stats in resync periodict task.")
-            self.sync_state()
+            if self.needs_resync_deep or self.resync_simple_cont >= 100:
+                self.needs_resync = False
+                self.needs_resync_deep = False
+                self.resync_simple_cont = 0
+                LOG.info("start to deep sync stats in resync periodict task.")
+                self.sync_state(contain_active=True)
+            else:
+                self.needs_resync = False
+                LOG.debug("start to simple sync stats in resync periodict task.")
+                self.sync_state(contain_active=False)
 
     @periodic_task.periodic_task(spacing=6)
     def collect_stats(self, context):
@@ -158,9 +167,10 @@ class LbaasAgentManager(n_rpc.RpcCallback, periodic_task.PeriodicTasks):
                 LOG.exception(_('Error updating statistics on pool %s'),
                               pool_id)
                 self.needs_resync = True
+                self.resync_simple_cont += 1
+                self._reload_pool(pool_id, contain_active=True)
 
-
-    def sync_state(self):
+    def sync_state(self, contain_active=True):
         known_instances = set(self.instance_mapping.keys())
         try:
             ready_instances = set(self.plugin_rpc.get_ready_devices())
@@ -169,11 +179,12 @@ class LbaasAgentManager(n_rpc.RpcCallback, periodic_task.PeriodicTasks):
                 self._destroy_pool(deleted_id)
 
             for pool_id in ready_instances:
-                self._reload_pool(pool_id)
+                self._reload_pool(pool_id, contain_active)
 
         except Exception:
             LOG.exception(_('Unable to retrieve ready devices'))
             self.needs_resync = True
+            self.needs_resync_deep = True
 
         self.remove_orphans()
 
@@ -184,7 +195,7 @@ class LbaasAgentManager(n_rpc.RpcCallback, periodic_task.PeriodicTasks):
         driver_name = self.instance_mapping[pool_id]
         return self.device_drivers[driver_name]
 
-    def _reload_pool(self, pool_id):
+    def _reload_pool(self, pool_id, contain_active=True):
         try:
             logical_config = self.plugin_rpc.get_logical_device(pool_id)
             driver_name = logical_config['driver']
@@ -195,12 +206,18 @@ class LbaasAgentManager(n_rpc.RpcCallback, periodic_task.PeriodicTasks):
                     'pool', pool_id, constants.ERROR)
                 return
 
+            if not contain_active:
+                if logical_config['pool']['status'] == constants.ACTIVE:
+                    return
+
             self.device_drivers[driver_name].deploy_instance(logical_config)
             self.instance_mapping[pool_id] = driver_name
             self.plugin_rpc.pool_deployed(pool_id)
         except Exception:
             LOG.exception(_('Unable to deploy instance for pool: %s'), pool_id)
             self.needs_resync = True
+            self.resync_simple_cont += 1
+            self._reload_pool(pool_id, contain_active=True)
 
     def _destroy_pool(self, pool_id):
         driver = self._get_driver(pool_id)
@@ -211,6 +228,8 @@ class LbaasAgentManager(n_rpc.RpcCallback, periodic_task.PeriodicTasks):
         except Exception:
             LOG.exception(_('Unable to destroy device for pool: %s'), pool_id)
             self.needs_resync = True
+            self.resync_simple_cont += 1
+            self._reload_pool(pool_id, contain_active=True)
 
     def remove_orphans(self):
         for driver_name in self.device_drivers:
@@ -346,6 +365,7 @@ class LbaasAgentManager(n_rpc.RpcCallback, periodic_task.PeriodicTasks):
             self.admin_state_up = payload['admin_state_up']
             if self.admin_state_up:
                 self.needs_resync = True
+                self.needs_resync_deep = True
             else:
                 for pool_id in self.instance_mapping.keys():
                     LOG.info(_("Destroying pool %s due to agent disabling"),

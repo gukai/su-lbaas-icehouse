@@ -26,8 +26,7 @@ API_VERSIONS = {
 
 
 def make_client(instance):
-    """Returns an neutron client.
-    """
+    """Returns an neutron client."""
     neutron_client = utils.get_client_class(
         API_NAME,
         instance._api_version[API_NAME],
@@ -46,7 +45,11 @@ def make_client(instance):
                                 token=instance._token,
                                 auth_strategy=instance._auth_strategy,
                                 insecure=instance._insecure,
-                                ca_cert=instance._ca_cert)
+                                ca_cert=instance._ca_cert,
+                                retries=instance._retries,
+                                raise_errors=instance._raise_errors,
+                                session=instance._session,
+                                auth=instance._auth)
         return client
     else:
         raise exceptions.UnsupportedVersion(_("API version %s is not "
@@ -56,6 +59,7 @@ def make_client(instance):
 
 def Client(api_version, *args, **kwargs):
     """Return an neutron client.
+
     @param api_version: only 2.0 is supported now
     """
     neutron_client = utils.get_client_class(

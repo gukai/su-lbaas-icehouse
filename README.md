@@ -1,4 +1,4 @@
-# su-lbaas-icehouse
+# su-lbaas-juno
 Code Base
-python-neutronclient-2.3.4
-openstack-neutron-2014.1
+python-neutronclient-2.3.9-1
+openstack-neutron-2014.2.2-1

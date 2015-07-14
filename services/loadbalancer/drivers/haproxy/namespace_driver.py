@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-#
 # Copyright 2013 New Dream Network, LLC (DreamHost)
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -13,8 +11,7 @@
 #    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 #    License for the specific language governing permissions and limitations
 #    under the License.
-#
-# @author: Mark McClain, DreamHost
+
 import os
 import shutil
 import socket
@@ -46,13 +43,21 @@ OPTS = [
         'loadbalancer_state_path',
         default=STATE_PATH_DEFAULT,
         help=_('Location to store config and state files'),
-        deprecated_opts=[cfg.DeprecatedOpt('loadbalancer_state_path')],
+        deprecated_opts=[cfg.DeprecatedOpt('loadbalancer_state_path',
+                                           group='DEFAULT')],
     ),
     cfg.StrOpt(
         'user_group',
         default=USER_GROUP_DEFAULT,
         help=_('The user group'),
-        deprecated_opts=[cfg.DeprecatedOpt('user_group')],
+        deprecated_opts=[cfg.DeprecatedOpt('user_group', group='DEFAULT')],
+    ),
+    cfg.IntOpt(
+        'send_gratuitous_arp',
+        default=3,
+        help=_('When delete and re-add the same vip, send this many '
+               'gratuitous ARPs to flush the ARP cache in the Router. '
+               'Set it below or equal to 0 to disable this feature.'),
     )
 ]
 cfg.CONF.register_opts(OPTS, 'haproxy')
@@ -68,7 +73,7 @@ class HaproxyNSDriver(agent_device_driver.AgentDeviceDriver):
         except ImportError:
             with excutils.save_and_reraise_exception():
                 msg = (_('Error importing interface driver: %s')
-                       % conf.haproxy.interface_driver)
+                       % conf.interface_driver)
                 LOG.error(msg)
 
         self.vif_driver = vif_driver
@@ -113,7 +118,7 @@ class HaproxyNSDriver(agent_device_driver.AgentDeviceDriver):
         self.pool_to_port_id[pool_id] = logical_config['vip']['port']['id']
 
     @n_utils.synchronized('haproxy-driver')
-    def undeploy_instance(self, pool_id):
+    def undeploy_instance(self, pool_id, cleanup_namespace=False):
         namespace = get_ns_name(pool_id)
         ns = ip_lib.IPWrapper(self.root_helper, namespace)
         pid_path = self._get_state_file_path(pool_id, 'pid')
@@ -125,6 +130,12 @@ class HaproxyNSDriver(agent_device_driver.AgentDeviceDriver):
         if pool_id in self.pool_to_port_id:
             self._unplug(namespace, self.pool_to_port_id[pool_id])
 
+        # delete all devices from namespace;
+        # used when deleting orphans and port_id is not known for pool_id
+        if cleanup_namespace:
+            for device in ns.get_devices(exclude_loopback=True):
+                self.vif_driver.unplug(device.name, namespace=namespace)
+
         # remove the configuration directory
         conf_dir = os.path.dirname(self._get_state_file_path(pool_id, ''))
         if os.path.isdir(conf_dir):
@@ -135,7 +146,7 @@ class HaproxyNSDriver(agent_device_driver.AgentDeviceDriver):
         namespace = get_ns_name(pool_id)
         root_ns = ip_lib.IPWrapper(self.root_helper)
 
-        socket_path = self._get_state_file_path(pool_id, 'sock')
+        socket_path = self._get_state_file_path(pool_id, 'sock', False)
         if root_ns.netns.exists(namespace) and os.path.exists(socket_path):
             try:
                 s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -146,21 +157,22 @@ class HaproxyNSDriver(agent_device_driver.AgentDeviceDriver):
         return False
 
     def get_stats(self, pool_id):
-        socket_path = self._get_state_file_path(pool_id, 'sock')
+        socket_path = self._get_state_file_path(pool_id, 'sock', False)
         TYPE_BACKEND_REQUEST = 2
         TYPE_SERVER_REQUEST = 4
         if os.path.exists(socket_path):
             parsed_stats = self._get_stats_from_socket(
                 socket_path,
                 entity_type=TYPE_BACKEND_REQUEST | TYPE_SERVER_REQUEST)
-            pool_stats = self._get_backend_stats(parsed_stats)
+            pool_stats = self._get_backend_stats(parsed_stats, pool_id)
             pool_stats['members'] = self._get_servers_stats(parsed_stats)
             return pool_stats
         else:
             LOG.warn(_('Stats socket not found for pool %s'), pool_id)
+            #raise
             return {}
 
-    def _get_backend_stats(self, parsed_stats):
+    def _get_backend_stats(self, parsed_stats, pool_id):
         TYPE_BACKEND_RESPONSE = '1'
         for stats in parsed_stats:
             if stats.get('type') == TYPE_BACKEND_RESPONSE:
@@ -203,7 +215,7 @@ class HaproxyNSDriver(agent_device_driver.AgentDeviceDriver):
         except socket.error as e:
             LOG.warn(_('Error while connecting to stats socket: %s'), e)
             raise socket.error
-            return {}
+            #return {}
 
     def _parse_stats(self, raw_stats):
         stat_lines = raw_stats.splitlines()
@@ -232,6 +244,7 @@ class HaproxyNSDriver(agent_device_driver.AgentDeviceDriver):
     #if someone delete a namespce which have running processes in it,
     # every command exec in namespace return  Invalid_Argument ERROR.
     def _fix_Invalid_Argument_namespace(self, namespace):
+        LOG.error("gukai try to delete the namespace")
         ns = ip_lib.IPWrapper(self.root_helper, namespace)
         if not ns.netns.exists(namespace):
             return
@@ -242,9 +255,11 @@ class HaproxyNSDriver(agent_device_driver.AgentDeviceDriver):
             ns.netns.delete(namespace)
 
     def _plug(self, namespace, port, reuse_existing=True):
-        self._fix_Invalid_Argument_namespace(namespace)
+        #self._fix_Invalid_Argument_namespace(namespace)
+
         self.plugin_rpc.plug_vip_port(port['id'])
         interface_name = self.vif_driver.get_device_name(Wrap(port))
+
 
         if ip_lib.device_exists(interface_name, self.root_helper, namespace):
             if not reuse_existing:
@@ -268,11 +283,29 @@ class HaproxyNSDriver(agent_device_driver.AgentDeviceDriver):
         self.vif_driver.init_l3(interface_name, cidrs, namespace=namespace)
 
         gw_ip = port['fixed_ips'][0]['subnet'].get('gateway_ip')
+
+        if not gw_ip:
+            host_routes = port['fixed_ips'][0]['subnet'].get('host_routes', [])
+            for host_route in host_routes:
+                if host_route['destination'] == "0.0.0.0/0":
+                    gw_ip = host_route['nexthop']
+                    break
+
         if gw_ip:
             cmd = ['route', 'add', 'default', 'gw', gw_ip]
             ip_wrapper = ip_lib.IPWrapper(self.root_helper,
                                           namespace=namespace)
             ip_wrapper.netns.execute(cmd, check_exit_code=False)
+            # When delete and re-add the same vip, we need to
+            # send gratuitous ARP to flush the ARP cache in the Router.
+            gratuitous_arp = self.conf.haproxy.send_gratuitous_arp
+            if gratuitous_arp > 0:
+                for ip in port['fixed_ips']:
+                    cmd_arping = ['arping', '-U',
+                                  '-I', interface_name,
+                                  '-c', gratuitous_arp,
+                                  ip['ip_address']]
+                    ip_wrapper.netns.execute(cmd_arping, check_exit_code=False)
 
     def _unplug(self, namespace, port_id):
         port_stub = {'id': port_id}
@@ -342,6 +375,16 @@ class HaproxyNSDriver(agent_device_driver.AgentDeviceDriver):
 
     def delete_pool_health_monitor(self, health_monitor, pool_id):
         self._refresh_device(pool_id)
+
+    def remove_orphans(self, known_pool_ids):
+        if not os.path.exists(self.state_path):
+            return
+
+        orphans = (pool_id for pool_id in os.listdir(self.state_path)
+                   if pool_id not in known_pool_ids)
+        for pool_id in orphans:
+            if self.exists(pool_id):
+                self.undeploy_instance(pool_id, cleanup_namespace=True)
 
 
 # NOTE (markmcclain) For compliance with interface.py which expects objects

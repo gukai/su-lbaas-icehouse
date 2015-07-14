@@ -14,11 +14,11 @@
 #    under the License.
 #
 
-import httplib
 import logging
 import time
-import urllib
-import urlparse
+
+import requests
+import six.moves.urllib.parse as urlparse
 
 from neutronclient import client
 from neutronclient.common import _
@@ -32,29 +32,14 @@ _logger = logging.getLogger(__name__)
 
 
 def exception_handler_v20(status_code, error_content):
-    """Exception handler for API v2.0 client
+    """Exception handler for API v2.0 client.
 
-        This routine generates the appropriate
-        Neutron exception according to the contents of the
-        response body
+    This routine generates the appropriate Neutron exception according to
+    the contents of the response body.
 
-        :param status_code: HTTP error status code
-        :param error_content: deserialized body of error response
+    :param status_code: HTTP error status code
+    :param error_content: deserialized body of error response
     """
-
-    neutron_errors = {
-        'NetworkNotFound': exceptions.NetworkNotFoundClient,
-        'NetworkInUse': exceptions.NetworkInUseClient,
-        'PortNotFound': exceptions.PortNotFoundClient,
-        'RequestedStateInvalid': exceptions.StateInvalidClient,
-        'PortInUse': exceptions.PortInUseClient,
-        'IpAddressInUse': exceptions.IpAddressInUseClient,
-        'AlreadyAttached': exceptions.AlreadyAttachedClient,
-        'IpAddressGenerationFailure':
-        exceptions.IpAddressGenerationFailureClient,
-        'ExternalIpAddressExhausted':
-        exceptions.ExternalIpAddressExhaustedClient, }
-
     error_dict = None
     if isinstance(error_content, dict):
         error_dict = error_content.get('NeutronError')
@@ -65,27 +50,30 @@ def exception_handler_v20(status_code, error_content):
         # a 'message' and 'type' keys?
         try:
             error_type = error_dict['type']
-            error_message = (error_dict['message'] + "\n" +
-                             error_dict['detail'])
+            error_message = error_dict['message']
+            if error_dict['detail']:
+                error_message += "\n" + error_dict['detail']
         except Exception:
             bad_neutron_error_flag = True
         if not bad_neutron_error_flag:
-            ex = None
-            try:
-                # raise the appropriate error!
-                ex = neutron_errors[error_type](message=error_message,
-                                                status_code=status_code)
-            except Exception:
-                pass
-            if ex:
-                raise ex
+            # If corresponding exception is defined, use it.
+            client_exc = getattr(exceptions, '%sClient' % error_type, None)
+            # Otherwise look up per status-code client exception
+            if not client_exc:
+                client_exc = exceptions.HTTP_EXCEPTION_MAP.get(status_code)
+            if client_exc:
+                raise client_exc(message=error_message,
+                                 status_code=status_code)
+            else:
+                raise exceptions.NeutronClientException(
+                    status_code=status_code, message=error_message)
         else:
             raise exceptions.NeutronClientException(status_code=status_code,
                                                     message=error_dict)
     else:
         message = None
         if isinstance(error_content, dict):
-            message = error_content.get('message', None)
+            message = error_content.get('message')
         if message:
             raise exceptions.NeutronClientException(status_code=status_code,
                                                     message=message)
@@ -97,8 +85,7 @@ def exception_handler_v20(status_code, error_content):
 
 
 class APIParamsCall(object):
-    """A Decorator to add support for format and tenant overriding
-       and filters
+    """A Decorator to add support for format and tenant overriding and filters.
     """
     def __init__(self, function):
         self.function = function
@@ -118,11 +105,14 @@ class Client(object):
     """Client for the OpenStack Neutron v2.0 API.
 
     :param string username: Username for authentication. (optional)
+    :param string user_id: User ID for authentication. (optional)
     :param string password: Password for authentication. (optional)
     :param string token: Token for authentication. (optional)
     :param string tenant_name: Tenant name. (optional)
     :param string tenant_id: Tenant id. (optional)
     :param string auth_url: Keystone service endpoint for authorization.
+    :param string service_type: Network service type to pull from the
+                                keystone catalog (e.g. 'network') (optional)
     :param string endpoint_type: Network service endpoint type to pull from the
                                  keystone catalog (e.g. 'publicURL',
                                  'internalURL', or 'adminURL') (optional)
@@ -136,6 +126,14 @@ class Client(object):
                             http requests. (optional)
     :param bool insecure: SSL certificate validation. (optional)
     :param string ca_cert: SSL CA bundle file to use. (optional)
+    :param integer retries: How many times idempotent (GET, PUT, DELETE)
+                            requests to Neutron server should be retried if
+                            they fail (default: 0).
+    :param bool raise_errors: If True then exceptions caused by connection
+                              failure are propagated to the caller.
+                              (default: True)
+    :param session: Keystone client auth session to use. (optional)
+    :param auth: Keystone auth plugin to use. (optional)
 
     Example::
 
@@ -194,6 +192,8 @@ class Client(object):
     agent_path = "/agents/%s"
     network_gateways_path = "/network-gateways"
     network_gateway_path = "/network-gateways/%s"
+    gateway_devices_path = "/gateway-devices"
+    gateway_device_path = "/gateway-devices/%s"
     service_providers_path = "/service-providers"
     credentials_path = "/credentials"
     credential_path = "/credentials/%s"
@@ -207,6 +207,9 @@ class Client(object):
     metering_label_path = "/metering/metering-labels/%s"
     metering_label_rules_path = "/metering/metering-label-rules"
     metering_label_rule_path = "/metering/metering-label-rules/%s"
+    packet_filters_path = "/packet_filters"
+    packet_filter_path = "/packet_filters/%s"
+
     DHCP_NETS = '/dhcp-networks'
     DHCP_AGENTS = '/dhcp-agents'
     L3_ROUTERS = '/l3-routers'
@@ -221,6 +224,8 @@ class Client(object):
     firewall_policy_remove_path = "/fw/firewall_policies/%s/remove_rule"
     firewalls_path = "/fw/firewalls"
     firewall_path = "/fw/firewalls/%s"
+    net_partitions_path = "/net-partitions"
+    net_partition_path = "/net-partitions/%s"
 
     # API has no way to report plurals, so we have to hard code them
     EXTED_PLURALS = {'routers': 'router',
@@ -243,7 +248,9 @@ class Client(object):
                      'firewall_policies': 'firewall_policy',
                      'firewalls': 'firewall',
                      'metering_labels': 'metering_label',
-                     'metering_label_rules': 'metering_label_rule'
+                     'metering_label_rules': 'metering_label_rule',
+                     'net_partitions': 'net_partition',
+                     'packet_filters': 'packet_filter',
                      }
     # 8192 Is the default max URI len for eventlet.wsgi.server
     MAX_URI_LEN = 8192
@@ -263,8 +270,7 @@ class Client(object):
 
     @APIParamsCall
     def get_quotas_tenant(self, **_params):
-        """Fetch tenant info in server's context for
-        following quota operation.
+        """Fetch tenant info in server's context for following quota operation.
         """
         return self.get(self.quota_path % 'tenant', params=_params)
 
@@ -510,28 +516,28 @@ class Client(object):
 
     @APIParamsCall
     def list_vpnservices(self, retrieve_all=True, **_params):
-        """Fetches a list of all configured VPNServices for a tenant."""
+        """Fetches a list of all configured VPN services for a tenant."""
         return self.list('vpnservices', self.vpnservices_path, retrieve_all,
                          **_params)
 
     @APIParamsCall
     def show_vpnservice(self, vpnservice, **_params):
-        """Fetches information of a specific VPNService."""
+        """Fetches information of a specific VPN service."""
         return self.get(self.vpnservice_path % (vpnservice), params=_params)
 
     @APIParamsCall
     def create_vpnservice(self, body=None):
-        """Creates a new VPNService."""
+        """Creates a new VPN service."""
         return self.post(self.vpnservices_path, body=body)
 
     @APIParamsCall
     def update_vpnservice(self, vpnservice, body=None):
-        """Updates a VPNService."""
+        """Updates a VPN service."""
         return self.put(self.vpnservice_path % (vpnservice), body=body)
 
     @APIParamsCall
     def delete_vpnservice(self, vpnservice):
-        """Deletes the specified VPNService."""
+        """Deletes the specified VPN service."""
         return self.delete(self.vpnservice_path % (vpnservice))
 
     @APIParamsCall
@@ -827,6 +833,33 @@ class Client(object):
         return self.put("%s/disconnect_network" % base_uri, body=body)
 
     @APIParamsCall
+    def list_gateway_devices(self, **_params):
+        """Retrieve gateway devices."""
+        return self.get(self.gateway_devices_path, params=_params)
+
+    @APIParamsCall
+    def show_gateway_device(self, gateway_device_id, **_params):
+        """Fetch a gateway device."""
+        return self.get(self.gateway_device_path % gateway_device_id,
+                        params=_params)
+
+    @APIParamsCall
+    def create_gateway_device(self, body=None):
+        """Create a new gateway device."""
+        return self.post(self.gateway_devices_path, body=body)
+
+    @APIParamsCall
+    def update_gateway_device(self, gateway_device_id, body=None):
+        """Updates a new gateway device."""
+        return self.put(self.gateway_device_path % gateway_device_id,
+                        body=body)
+
+    @APIParamsCall
+    def delete_gateway_device(self, gateway_device_id):
+        """Delete the specified gateway device."""
+        return self.delete(self.gateway_device_path % gateway_device_id)
+
+    @APIParamsCall
     def list_dhcp_agent_hosting_networks(self, network, **_params):
         """Fetches a list of dhcp agents hosting a network."""
         return self.get((self.network_path + self.DHCP_AGENTS) % network,
@@ -1110,19 +1143,68 @@ class Client(object):
         return self.get(self.metering_label_rule_path %
                         (metering_label_rule), params=_params)
 
+    @APIParamsCall
+    def list_net_partitions(self, **params):
+        """Fetch a list of all network partitions for a tenant."""
+        return self.get(self.net_partitions_path, params=params)
+
+    @APIParamsCall
+    def show_net_partition(self, netpartition, **params):
+        """Fetch a network partition."""
+        return self.get(self.net_partition_path % (netpartition),
+                        params=params)
+
+    @APIParamsCall
+    def create_net_partition(self, body=None):
+        """Create a network partition."""
+        return self.post(self.net_partitions_path, body=body)
+
+    @APIParamsCall
+    def delete_net_partition(self, netpartition):
+        """Delete the network partition."""
+        return self.delete(self.net_partition_path % netpartition)
+
+    @APIParamsCall
+    def create_packet_filter(self, body=None):
+        """Create a new packet filter."""
+        return self.post(self.packet_filters_path, body=body)
+
+    @APIParamsCall
+    def update_packet_filter(self, packet_filter_id, body=None):
+        """Update a packet filter."""
+        return self.put(self.packet_filter_path % packet_filter_id, body=body)
+
+    @APIParamsCall
+    def list_packet_filters(self, retrieve_all=True, **_params):
+        """Fetch a list of all packet filters for a tenant."""
+        return self.list('packet_filters', self.packet_filters_path,
+                         retrieve_all, **_params)
+
+    @APIParamsCall
+    def show_packet_filter(self, packet_filter_id, **_params):
+        """Fetch information of a certain packet filter."""
+        return self.get(self.packet_filter_path % packet_filter_id,
+                        params=_params)
+
+    @APIParamsCall
+    def delete_packet_filter(self, packet_filter_id):
+        """Delete the specified packet filter."""
+        return self.delete(self.packet_filter_path % packet_filter_id)
+
     def __init__(self, **kwargs):
         """Initialize a new client for the Neutron v2.0 API."""
         super(Client, self).__init__()
-        self.httpclient = client.HTTPClient(**kwargs)
+        self.retries = kwargs.pop('retries', 0)
+        self.raise_errors = kwargs.pop('raise_errors', True)
+        self.httpclient = client.construct_http_client(**kwargs)
         self.version = '2.0'
         self.format = 'json'
         self.action_prefix = "/v%s" % (self.version)
-        self.retries = 0
         self.retry_interval = 1
 
     def _handle_fault_response(self, status_code, response_body):
         # Create exception with HTTP status code and message
-        _logger.debug(_("Error message: %s"), response_body)
+        _logger.debug("Error message: %s", response_body)
         # Add deserialized error message to exception arguments
         try:
             des_error_body = self.deserialize(response_body, status_code)
@@ -1145,43 +1227,37 @@ class Client(object):
         action = self.action_prefix + action
         if type(params) is dict and params:
             params = utils.safe_encode_dict(params)
-            action += '?' + urllib.urlencode(params, doseq=1)
+            action += '?' + urlparse.urlencode(params, doseq=1)
         # Ensure client always has correct uri - do not guesstimate anything
         self.httpclient.authenticate_and_fetch_endpoint_url()
         self._check_uri_length(action)
 
         if body:
             body = self.serialize(body)
-        self.httpclient.content_type = self.content_type()
-        resp, replybody = self.httpclient.do_request(action, method, body=body)
-        status_code = self.get_status_code(resp)
-        if status_code in (httplib.OK,
-                           httplib.CREATED,
-                           httplib.ACCEPTED,
-                           httplib.NO_CONTENT):
+
+        resp, replybody = self.httpclient.do_request(
+            action, method, body=body,
+            content_type=self.content_type())
+
+        status_code = resp.status_code
+        if status_code in (requests.codes.ok,
+                           requests.codes.created,
+                           requests.codes.accepted,
+                           requests.codes.no_content):
             return self.deserialize(replybody, status_code)
         else:
+            if not replybody:
+                replybody = resp.reason
             self._handle_fault_response(status_code, replybody)
 
     def get_auth_info(self):
         return self.httpclient.get_auth_info()
 
-    def get_status_code(self, response):
-        """Returns the integer status code from the response.
-
-        Either a Webob.Response (used in testing) or httplib.Response
-        is returned.
-        """
-        if hasattr(response, 'status_int'):
-            return response.status_int
-        else:
-            return response.status
-
     def serialize(self, data):
-        """Serializes a dictionary into either xml or json.
+        """Serializes a dictionary into either XML or JSON.
 
-        A dictionary with a single key can be passed and
-        it can contain any structure.
+        A dictionary with a single key can be passed and it can contain any
+        structure.
         """
         if data is None:
             return None
@@ -1193,7 +1269,7 @@ class Client(object):
                             type(data))
 
     def deserialize(self, data, status_code):
-        """Deserializes an xml or json string into a dictionary."""
+        """Deserializes an XML or JSON string into a dictionary."""
         if status_code == 204:
             return data
         return serializer.Serializer(self.get_attr_metadata()).deserialize(
@@ -1222,10 +1298,18 @@ class Client(object):
             except exceptions.ConnectionFailed:
                 # Exception has already been logged by do_request()
                 if i < self.retries:
-                    _logger.debug(_('Retrying connection to Neutron service'))
+                    _logger.debug('Retrying connection to Neutron service')
                     time.sleep(self.retry_interval)
+                elif self.raise_errors:
+                    raise
 
-        raise exceptions.ConnectionFailed(reason=_("Maximum attempts reached"))
+        if self.retries:
+            msg = (_("Failed to connect to Neutron server after %d attempts")
+                   % max_attempts)
+        else:
+            msg = _("Failed to connect Neutron server")
+
+        raise exceptions.ConnectionFailed(reason=msg)
 
     def delete(self, action, body=None, headers=None, params=None):
         return self.retry_request("DELETE", action, body=body,

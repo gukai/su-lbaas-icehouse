@@ -15,18 +15,18 @@
 #
 
 import argparse
-import logging
 
 from neutronclient.common import exceptions
 from neutronclient.common import utils
 from neutronclient.neutron import v2_0 as neutronV20
 from neutronclient.openstack.common.gettextutils import _
+from neutronclient.openstack.common import jsonutils
 
 
 def _format_fixed_ips(port):
     try:
-        return '\n'.join([utils.dumps(ip) for ip in port['fixed_ips']])
-    except Exception:
+        return '\n'.join([jsonutils.dumps(ip) for ip in port['fixed_ips']])
+    except (TypeError, KeyError):
         return ''
 
 
@@ -34,7 +34,6 @@ class ListPort(neutronV20.ListCommand):
     """List ports that belong to a given tenant."""
 
     resource = 'port'
-    log = logging.getLogger(__name__ + '.ListPort')
     _formatters = {'fixed_ips': _format_fixed_ips, }
     list_columns = ['id', 'name', 'mac_address', 'fixed_ips']
     pagination_support = True
@@ -45,7 +44,6 @@ class ListRouterPort(neutronV20.ListCommand):
     """List ports that belong to a given tenant, with specified router."""
 
     resource = 'port'
-    log = logging.getLogger(__name__ + '.ListRouterPort')
     _formatters = {'fixed_ips': _format_fixed_ips, }
     list_columns = ['id', 'name', 'mac_address', 'fixed_ips']
     pagination_support = True
@@ -55,7 +53,7 @@ class ListRouterPort(neutronV20.ListCommand):
         parser = super(ListRouterPort, self).get_parser(prog_name)
         parser.add_argument(
             'id', metavar='router',
-            help=_('ID or name of router to look up'))
+            help=_('ID or name of router to look up.'))
         return parser
 
     def get_data(self, parsed_args):
@@ -71,7 +69,6 @@ class ShowPort(neutronV20.ShowCommand):
     """Show information of a given port."""
 
     resource = 'port'
-    log = logging.getLogger(__name__ + '.ShowPort')
 
 
 class UpdatePortSecGroupMixin(object):
@@ -80,12 +77,12 @@ class UpdatePortSecGroupMixin(object):
         group_sg.add_argument(
             '--security-group', metavar='SECURITY_GROUP',
             default=[], action='append', dest='security_groups',
-            help=_('Security group associated with the port '
-            '(This option can be repeated)'))
+            help=_('Security group associated with the port. You can '
+                   'repeat this option.'))
         group_sg.add_argument(
             '--no-security-groups',
             action='store_true',
-            help=_('Associate no security groups with the port'))
+            help=_('Associate no security groups with the port.'))
 
     def _resolv_sgid(self, secgroup):
         return neutronV20.find_resourceid_by_name_or_id(
@@ -108,8 +105,8 @@ class UpdateExtraDhcpOptMixin(object):
             action='append',
             dest='extra_dhcp_opts',
             help=_('Extra dhcp options to be assigned to this port: '
-                   'opt_name=<dhcp_option_name>,opt_value=<value>, '
-                   '(This option can be repeated.)'))
+                   'opt_name=<dhcp_option_name>,opt_value=<value>. You can '
+                   'repeat this option.'))
 
     def args2body_extradhcpopt(self, parsed_args, port):
         ops = []
@@ -119,13 +116,15 @@ class UpdateExtraDhcpOptMixin(object):
             # both must be thrown out.
             opt_ele = {}
             edo_err_msg = _("Invalid --extra-dhcp-opt option, can only be: "
-                            "opt_name=<dhcp_option_name>,opt_value=<value>, "
-                            "(This option can be repeated.")
+                            "opt_name=<dhcp_option_name>,opt_value=<value>. "
+                            "You can repeat this option.")
             for opt in parsed_args.extra_dhcp_opts:
                 if opt.split('=')[0] in ['opt_value', 'opt_name']:
                     opt_ele.update(utils.str2dict(opt))
                     if (('opt_name' in opt_ele) and
                         ('opt_value' in opt_ele)):
+                        if opt_ele['opt_value'] == 'null':
+                            opt_ele['opt_value'] = None
                         ops.append(opt_ele)
                         opt_ele = {}
                     else:
@@ -142,29 +141,28 @@ class CreatePort(neutronV20.CreateCommand, UpdatePortSecGroupMixin,
     """Create a port for a given tenant."""
 
     resource = 'port'
-    log = logging.getLogger(__name__ + '.CreatePort')
 
     def add_known_arguments(self, parser):
         parser.add_argument(
             '--name',
-            help=_('Name of this port'))
+            help=_('Name of this port.'))
         parser.add_argument(
             '--admin-state-down',
             dest='admin_state', action='store_false',
-            help=_('Set admin state up to false'))
+            help=_('Set admin state up to false.'))
         parser.add_argument(
             '--admin_state_down',
             dest='admin_state', action='store_false',
             help=argparse.SUPPRESS)
         parser.add_argument(
             '--mac-address',
-            help=_('MAC address of this port'))
+            help=_('MAC address of this port.'))
         parser.add_argument(
             '--mac_address',
             help=argparse.SUPPRESS)
         parser.add_argument(
             '--device-id',
-            help=_('Device id of this port'))
+            help=_('Device ID of this port.'))
         parser.add_argument(
             '--device_id',
             help=argparse.SUPPRESS)
@@ -172,8 +170,8 @@ class CreatePort(neutronV20.CreateCommand, UpdatePortSecGroupMixin,
             '--fixed-ip', metavar='subnet_id=SUBNET,ip_address=IP_ADDR',
             action='append',
             help=_('Desired IP and/or subnet for this port: '
-                   'subnet_id=<name_or_id>,ip_address=<ip>, '
-                   '(This option can be repeated.)'))
+                   'subnet_id=<name_or_id>,ip_address=<ip>.'
+                   'You can repeat this option.'))
         parser.add_argument(
             '--fixed_ip',
             action='append',
@@ -184,7 +182,7 @@ class CreatePort(neutronV20.CreateCommand, UpdatePortSecGroupMixin,
 
         parser.add_argument(
             'network_id', metavar='NETWORK',
-            help=_('Network id or name this port belongs to'))
+            help=_('Network ID or name this port belongs to.'))
 
     def args2body(self, parsed_args):
         _network_id = neutronV20.find_resourceid_by_name_or_id(
@@ -222,7 +220,6 @@ class DeletePort(neutronV20.DeleteCommand):
     """Delete a given port."""
 
     resource = 'port'
-    log = logging.getLogger(__name__ + '.DeletePort')
 
 
 class UpdatePort(neutronV20.UpdateCommand, UpdatePortSecGroupMixin,
@@ -230,7 +227,6 @@ class UpdatePort(neutronV20.UpdateCommand, UpdatePortSecGroupMixin,
     """Update port's information."""
 
     resource = 'port'
-    log = logging.getLogger(__name__ + '.UpdatePort')
 
     def add_known_arguments(self, parser):
         self.add_arguments_secgroup(parser)

@@ -16,4 +16,4 @@
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 # @author: Carl Baldwin, Hewlett-Packard
 
-__version__ = "2.3.4"
+__version__ = "2.3.9"

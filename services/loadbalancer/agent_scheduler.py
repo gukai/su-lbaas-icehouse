@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 # Copyright (c) 2013 OpenStack Foundation.
 # All Rights Reserved.
 #
@@ -39,7 +37,8 @@ class PoolLoadbalancerAgentBinding(model_base.BASEV2):
                         primary_key=True)
     agent = orm.relation(agents_db.Agent)
     agent_id = sa.Column(sa.String(36), sa.ForeignKey("agents.id",
-                                                      ondelete='CASCADE'))
+                                                      ondelete='CASCADE'),
+                         nullable=False)
 
 
 class LbaasAgentSchedulerDbMixin(agentschedulers_db.AgentSchedulerDbMixin,
@@ -112,7 +111,7 @@ class ChanceScheduler(object):
             lbaas_agent = plugin.get_lbaas_agent_hosting_pool(
                 context, pool['id'])
             if lbaas_agent:
-                LOG.debug(_('Pool %(pool_id)s has already been hosted'
+                LOG.error(_('Pool %(pool_id)s has already been hosted'
                             ' by lbaas agent %(agent_id)s'),
                           {'pool_id': pool['id'],
                            'agent_id': lbaas_agent['id']})

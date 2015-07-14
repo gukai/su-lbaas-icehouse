@@ -14,6 +14,7 @@
 #    under the License.
 #
 
+import abc
 try:
     import json
 except ImportError:
@@ -21,7 +22,10 @@ except ImportError:
 import logging
 import os
 
-import httplib2
+from keystoneclient import access
+from keystoneclient.auth.identity.base import BaseIdentityPlugin
+import requests
+import six
 
 from neutronclient.common import exceptions
 from neutronclient.common import utils
@@ -29,107 +33,82 @@ from neutronclient.openstack.common.gettextutils import _
 
 _logger = logging.getLogger(__name__)
 
-# httplib2 retries requests on socket.timeout which
-# is not idempotent and can lead to orhan objects.
-# See: https://code.google.com/p/httplib2/issues/detail?id=124
-httplib2.RETRIES = 1
-
 if os.environ.get('NEUTRONCLIENT_DEBUG'):
     ch = logging.StreamHandler()
     _logger.setLevel(logging.DEBUG)
     _logger.addHandler(ch)
+    _requests_log_level = logging.DEBUG
+else:
+    _requests_log_level = logging.WARNING
+
+logging.getLogger("requests").setLevel(_requests_log_level)
 
 
-class ServiceCatalog(object):
-    """Helper methods for dealing with a Keystone Service Catalog."""
-
-    def __init__(self, resource_dict):
-        self.catalog = resource_dict
-
-    def get_token(self):
-        """Fetch token details fron service catalog."""
-        token = {'id': self.catalog['access']['token']['id'],
-                 'expires': self.catalog['access']['token']['expires'], }
-        try:
-            token['user_id'] = self.catalog['access']['user']['id']
-            token['tenant_id'] = (
-                self.catalog['access']['token']['tenant']['id'])
-        except Exception:
-            # just leave the tenant and user out if it doesn't exist
-            pass
-        return token
-
-    def url_for(self, attr=None, filter_value=None,
-                service_type='network', endpoint_type='publicURL'):
-        """Fetch the URL from the Neutron service for
-        a particular endpoint type. If none given, return
-        publicURL.
-        """
-
-        catalog = self.catalog['access'].get('serviceCatalog', [])
-        matching_endpoints = []
-        for service in catalog:
-            if service['type'] != service_type:
-                continue
-
-            endpoints = service['endpoints']
-            for endpoint in endpoints:
-                if not filter_value or endpoint.get(attr) == filter_value:
-                    matching_endpoints.append(endpoint)
-
-        if not matching_endpoints:
-            raise exceptions.EndpointNotFound()
-        elif len(matching_endpoints) > 1:
-            raise exceptions.AmbiguousEndpoints(message=matching_endpoints)
-        else:
-            if endpoint_type not in matching_endpoints[0]:
-                raise exceptions.EndpointTypeNotFound(message=endpoint_type)
-
-            return matching_endpoints[0][endpoint_type]
-
-
-class HTTPClient(httplib2.Http):
-    """Handles the REST calls and responses, include authn."""
+@six.add_metaclass(abc.ABCMeta)
+class AbstractHTTPClient(object):
 
     USER_AGENT = 'python-neutronclient'
+    CONTENT_TYPE = 'application/json'
 
-    def __init__(self, username=None, tenant_name=None, tenant_id=None,
+    def request(self, url, method, body=None, content_type=None, headers=None,
+                **kwargs):
+        """Request without authentication."""
+
+        headers = headers or {}
+        content_type = content_type or self.CONTENT_TYPE
+        headers.setdefault('Accept', content_type)
+        if body:
+            headers.setdefault('Content-Type', content_type)
+
+        return self._request(url, method, body=body, headers=headers, **kwargs)
+
+    @abc.abstractmethod
+    def do_request(self, url, method, **kwargs):
+        """Request with authentication."""
+
+    @abc.abstractmethod
+    def _request(self, url, method, body=None, headers=None, **kwargs):
+        """Request without authentication nor headers population."""
+
+
+class HTTPClient(AbstractHTTPClient):
+    """Handles the REST calls and responses, include authentication."""
+
+    def __init__(self, username=None, user_id=None,
+                 tenant_name=None, tenant_id=None,
                  password=None, auth_url=None,
                  token=None, region_name=None, timeout=None,
                  endpoint_url=None, insecure=False,
                  endpoint_type='publicURL',
                  auth_strategy='keystone', ca_cert=None, log_credentials=False,
+                 service_type='network',
                  **kwargs):
-        super(HTTPClient, self).__init__(timeout=timeout, ca_certs=ca_cert)
 
         self.username = username
+        self.user_id = user_id
         self.tenant_name = tenant_name
         self.tenant_id = tenant_id
         self.password = password
         self.auth_url = auth_url.rstrip('/') if auth_url else None
+        self.service_type = service_type
         self.endpoint_type = endpoint_type
         self.region_name = region_name
+        self.timeout = timeout
         self.auth_token = token
         self.auth_tenant_id = None
         self.auth_user_id = None
-        self.content_type = 'application/json'
         self.endpoint_url = endpoint_url
         self.auth_strategy = auth_strategy
         self.log_credentials = log_credentials
-        # httplib2 overrides
-        self.disable_ssl_certificate_validation = insecure
+        if insecure:
+            self.verify_cert = False
+        else:
+            self.verify_cert = ca_cert if ca_cert else True
 
     def _cs_request(self, *args, **kwargs):
         kargs = {}
         kargs.setdefault('headers', kwargs.get('headers', {}))
         kargs['headers']['User-Agent'] = self.USER_AGENT
-
-        if 'content_type' in kwargs:
-            kargs['headers']['Content-Type'] = kwargs['content_type']
-            kargs['headers']['Accept'] = kwargs['content_type']
-        else:
-            kargs['headers']['Content-Type'] = self.content_type
-            kargs['headers']['Accept'] = self.content_type
 
         if 'body' in kwargs:
             kargs['body'] = kwargs['body']
@@ -144,7 +123,7 @@ class HTTPClient(httplib2.Http):
         utils.http_log_req(_logger, args, log_kargs)
         try:
             resp, body = self.request(*args, **kargs)
-        except httplib2.SSLHandshakeError as e:
+        except requests.exceptions.SSLError as e:
             raise exceptions.SslCertificateValidationError(reason=e)
         except Exception as e:
             # Wrap the low-level connection error (socket timeout, redirect
@@ -152,17 +131,9 @@ class HTTPClient(httplib2.Http):
             # connection exception (it is excepted in the upper layers of code)
             _logger.debug("throwing ConnectionFailed : %s", e)
             raise exceptions.ConnectionFailed(reason=e)
-        finally:
-            # Temporary Fix for gate failures. RPC calls and HTTP requests
-            # seem to be stepping on each other resulting in bogus fd's being
-            # picked up for making http requests
-            self.connections.clear()
         utils.http_log_resp(_logger, resp, body)
-        status_code = self.get_status_code(resp)
-        if status_code == 401:
+        if resp.status_code == 401:
             raise exceptions.Unauthorized(message=body)
-        elif status_code == 403:
-            raise exceptions.Forbidden(message=body)
         return resp, body
 
     def _strip_credentials(self, kwargs):
@@ -180,6 +151,21 @@ class HTTPClient(httplib2.Http):
         elif not self.endpoint_url:
             self.endpoint_url = self._get_endpoint_url()
 
+    def _request(self, url, method, body=None, headers=None, **kwargs):
+        headers = headers or {}
+        headers['User-Agent'] = self.USER_AGENT
+
+        resp = requests.request(
+            method,
+            url,
+            data=body,
+            headers=headers,
+            verify=self.verify_cert,
+            timeout=self.timeout,
+            **kwargs)
+
+        return resp, resp.text
+
     def do_request(self, url, method, **kwargs):
         self.authenticate_and_fetch_endpoint_url()
         # Perform the request once. If we get a 401 back then it
@@ -187,6 +173,8 @@ class HTTPClient(httplib2.Http):
         # re-authenticate and try again. If it still fails, bail.
         try:
             kwargs.setdefault('headers', {})
+            if self.auth_token is None:
+                self.auth_token = ""
             kwargs['headers']['X-Auth-Token'] = self.auth_token
             resp, body = self._cs_request(self.endpoint_url + url, method,
                                           **kwargs)
@@ -201,46 +189,42 @@ class HTTPClient(httplib2.Http):
 
     def _extract_service_catalog(self, body):
         """Set the client's service catalog from the response data."""
-        self.service_catalog = ServiceCatalog(body)
-        try:
-            sc = self.service_catalog.get_token()
-            self.auth_token = sc['id']
-            self.auth_tenant_id = sc.get('tenant_id')
-            self.auth_user_id = sc.get('user_id')
-        except KeyError:
-            raise exceptions.Unauthorized()
+        self.auth_ref = access.AccessInfo.factory(body=body)
+        self.service_catalog = self.auth_ref.service_catalog
+        self.auth_token = self.auth_ref.auth_token
+        self.auth_tenant_id = self.auth_ref.tenant_id
+        self.auth_user_id = self.auth_ref.user_id
+
         if not self.endpoint_url:
             self.endpoint_url = self.service_catalog.url_for(
                 attr='region', filter_value=self.region_name,
+                service_type=self.service_type,
                 endpoint_type=self.endpoint_type)
 
-    def authenticate(self):
-        if self.auth_strategy != 'keystone':
-            raise exceptions.Unauthorized(message=_('Unknown auth strategy'))
+    def _authenticate_keystone(self):
+        if self.user_id:
+            creds = {'userId': self.user_id,
+                     'password': self.password}
+        else:
+            creds = {'username': self.username,
+                     'password': self.password}
+
         if self.tenant_id:
-            body = {'auth': {'passwordCredentials':
-                             {'username': self.username,
-                              'password': self.password, },
+            body = {'auth': {'passwordCredentials': creds,
                              'tenantId': self.tenant_id, }, }
         else:
-            body = {'auth': {'passwordCredentials':
-                             {'username': self.username,
-                              'password': self.password, },
+            body = {'auth': {'passwordCredentials': creds,
                              'tenantName': self.tenant_name, }, }
 
-        token_url = self.auth_url + "/tokens"
+        if self.auth_url is None:
+            raise exceptions.NoAuthURLProvided()
 
-        # Make sure we follow redirects when trying to reach Keystone
-        tmp_follow_all_redirects = self.follow_all_redirects
-        self.follow_all_redirects = True
-        try:
-            resp, resp_body = self._cs_request(token_url, "POST",
-                                               body=json.dumps(body),
-                                               content_type="application/json")
-        finally:
-            self.follow_all_redirects = tmp_follow_all_redirects
-        status_code = self.get_status_code(resp)
-        if status_code != 200:
+        token_url = self.auth_url + "/tokens"
+        resp, resp_body = self._cs_request(token_url, "POST",
+                                           body=json.dumps(body),
+                                           content_type="application/json",
+                                           allow_redirects=True)
+        if resp.status_code != 200:
             raise exceptions.Unauthorized(message=resp_body)
         if resp_body:
             try:
@@ -251,7 +235,26 @@ class HTTPClient(httplib2.Http):
             resp_body = None
         self._extract_service_catalog(resp_body)
 
+    def _authenticate_noauth(self):
+        if not self.endpoint_url:
+            message = _('For "noauth" authentication strategy, the endpoint '
+                        'must be specified either in the constructor or '
+                        'using --os-url')
+            raise exceptions.Unauthorized(message=message)
+
+    def authenticate(self):
+        if self.auth_strategy == 'keystone':
+            self._authenticate_keystone()
+        elif self.auth_strategy == 'noauth':
+            self._authenticate_noauth()
+        else:
+            err_msg = _('Unknown auth strategy: %s') % self.auth_strategy
+            raise exceptions.Unauthorized(message=err_msg)
+
     def _get_endpoint_url(self):
+        if self.auth_url is None:
+            raise exceptions.NoAuthURLProvided()
+
         url = self.auth_url + '/tokens/%s/endpoints' % self.auth_token
         try:
             resp, body = self._cs_request(url, "GET")
@@ -267,7 +270,7 @@ class HTTPClient(httplib2.Http):
                 endpoint.get('region') == self.region_name):
                 if self.endpoint_type not in endpoint:
                     raise exceptions.EndpointTypeNotFound(
-                        message=self.endpoint_type)
+                        type_=self.endpoint_type)
                 return endpoint[self.endpoint_type]
 
         raise exceptions.EndpointNotFound()
@@ -278,13 +281,118 @@ class HTTPClient(httplib2.Http):
                 'auth_user_id': self.auth_user_id,
                 'endpoint_url': self.endpoint_url}
 
-    def get_status_code(self, response):
-        """Returns the integer status code from the response.
 
-        Either a Webob.Response (used in testing) or httplib.Response
-        is returned.
-        """
-        if hasattr(response, 'status_int'):
-            return response.status_int
-        else:
-            return response.status
+class SessionClient(AbstractHTTPClient):
+
+    def __init__(self,
+                 session,
+                 auth,
+                 interface=None,
+                 service_type=None,
+                 region_name=None):
+
+        self.session = session
+        self.auth = auth
+        self.interface = interface
+        self.service_type = service_type
+        self.region_name = region_name
+        self.auth_token = None
+        self.endpoint_url = None
+
+    def _request(self, url, method, body=None, headers=None, **kwargs):
+        kwargs.setdefault('user_agent', self.USER_AGENT)
+        kwargs.setdefault('auth', self.auth)
+        kwargs.setdefault('authenticated', False)
+
+        endpoint_filter = kwargs.setdefault('endpoint_filter', {})
+        endpoint_filter.setdefault('interface', self.interface)
+        endpoint_filter.setdefault('service_type', self.service_type)
+        endpoint_filter.setdefault('region_name', self.region_name)
+
+        kwargs = utils.safe_encode_dict(kwargs)
+        resp = self.session.request(url, method, data=body, headers=headers,
+                                    **kwargs)
+        return resp, resp.text
+
+    def do_request(self, url, method, **kwargs):
+        kwargs.setdefault('authenticated', True)
+        return self.request(url, method, **kwargs)
+
+    def authenticate(self):
+        # This method is provided for backward compatibility only.
+        # We only care about setting the service endpoint.
+        self.endpoint_url = self.session.get_endpoint(
+            self.auth,
+            service_type=self.service_type,
+            region_name=self.region_name,
+            interface=self.interface)
+
+    def authenticate_and_fetch_endpoint_url(self):
+        # This method is provided for backward compatibility only.
+        # We only care about setting the service endpoint.
+        self.authenticate()
+
+    def get_auth_info(self):
+        # This method is provided for backward compatibility only.
+        if not isinstance(self.auth, BaseIdentityPlugin):
+            msg = ('Auth info not available. Auth plugin is not an identity '
+                   'auth plugin.')
+            raise exceptions.NeutronClientException(message=msg)
+        access_info = self.auth.get_access(self.session)
+        endpoint_url = self.auth.get_endpoint(self.session,
+                                              service_type=self.service_type,
+                                              region_name=self.region_name,
+                                              interface=self.interface)
+        return {'auth_token': access_info.auth_token,
+                'auth_tenant_id': access_info.tenant_id,
+                'auth_user_id': access_info.user_id,
+                'endpoint_url': endpoint_url}
+
+
+# FIXME(bklei): Should refactor this to use kwargs and only
+# explicitly list arguments that are not None.
+def construct_http_client(username=None,
+                          user_id=None,
+                          tenant_name=None,
+                          tenant_id=None,
+                          password=None,
+                          auth_url=None,
+                          token=None,
+                          region_name=None,
+                          timeout=None,
+                          endpoint_url=None,
+                          insecure=False,
+                          endpoint_type='publicURL',
+                          log_credentials=None,
+                          auth_strategy='keystone',
+                          ca_cert=None,
+                          service_type='network',
+                          session=None,
+                          auth=None):
+
+    if session:
+        return SessionClient(session=session,
+                             auth=auth,
+                             interface=endpoint_type,
+                             service_type=service_type,
+                             region_name=region_name)
+    else:
+        # FIXME(bklei): username and password are now optional. Need
+        # to test that they were provided in this mode.  Should also
+        # refactor to use kwargs.
+        return HTTPClient(username=username,
+                          password=password,
+                          tenant_id=tenant_id,
+                          tenant_name=tenant_name,
+                          user_id=user_id,
+                          auth_url=auth_url,
+                          token=token,
+                          endpoint_url=endpoint_url,
+                          insecure=insecure,
+                          timeout=timeout,
+                          region_name=region_name,
+                          endpoint_type=endpoint_type,
+                          service_type=service_type,
+                          ca_cert=ca_cert,
+                          log_credentials=log_credentials,
+                          auth_strategy=auth_strategy)

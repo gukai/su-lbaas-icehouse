@@ -14,15 +14,13 @@
 #    under the License.
 #
 
-import logging
-
 from neutronclient.neutron import v2_0 as neutronV20
 
 
 def _format_timestamp(component):
     try:
         return component['heartbeat_timestamp'].split(".", 2)[0]
-    except Exception:
+    except (TypeError, KeyError):
         return ''
 
 
@@ -30,20 +28,21 @@ class ListAgent(neutronV20.ListCommand):
     """List agents."""
 
     resource = 'agent'
-    log = logging.getLogger(__name__ + '.ListAgent')
-    list_columns = ['id', 'agent_type', 'host', 'alive', 'admin_state_up']
+    list_columns = ['id', 'agent_type', 'host', 'alive', 'admin_state_up',
+                    'binary']
     _formatters = {'heartbeat_timestamp': _format_timestamp}
+    sorting_support = True
 
     def extend_list(self, data, parsed_args):
         for agent in data:
-            agent['alive'] = ":-)" if agent['alive'] else 'xxx'
+            if 'alive' in agent:
+                agent['alive'] = ":-)" if agent['alive'] else 'xxx'
 
 
 class ShowAgent(neutronV20.ShowCommand):
     """Show information of a given agent."""
 
     resource = 'agent'
-    log = logging.getLogger(__name__ + '.ShowAgent')
     allow_names = False
     json_indent = 5
 
@@ -51,7 +50,6 @@ class ShowAgent(neutronV20.ShowCommand):
 class DeleteAgent(neutronV20.DeleteCommand):
     """Delete a given agent."""
 
-    log = logging.getLogger(__name__ + '.DeleteAgent')
     resource = 'agent'
     allow_names = False
 
@@ -59,6 +57,5 @@ class DeleteAgent(neutronV20.DeleteCommand):
 class UpdateAgent(neutronV20.UpdateCommand):
     """Update a given agent."""
 
-    log = logging.getLogger(__name__ + '.UpdateAgent')
     resource = 'agent'
     allow_names = False

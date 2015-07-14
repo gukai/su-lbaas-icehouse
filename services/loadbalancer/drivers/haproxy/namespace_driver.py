@@ -255,7 +255,7 @@ class HaproxyNSDriver(agent_device_driver.AgentDeviceDriver):
             ns.netns.delete(namespace)
 
     def _plug(self, namespace, port, reuse_existing=True):
-        self._fix_Invalid_Argument_namespace(namespace)
+        #self._fix_Invalid_Argument_namespace(namespace)
 
         self.plugin_rpc.plug_vip_port(port['id'])
         interface_name = self.vif_driver.get_device_name(Wrap(port))
